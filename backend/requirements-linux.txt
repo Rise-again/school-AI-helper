@@ -1,0 +1,18 @@
+# 云端后端依赖 —— Ubuntu 22.04 / Python 3.10.x
+# 与 Windows 版保持一致，避免"本地能跑线上挂"；差异只在部署脚本，不在包版本。
+# 模型相关依赖见 model_service/requirements-linux.txt，两者不要装进同一个 venv。
+
+fastapi==0.162.0
+uvicorn==0.54.0
+pydantic==2.14.3
+aiomysql==0.3.2
+PyJWT==2.15.1
+bcrypt==5.0.0
+python-multipart==0.0.32
+httpx==0.28.1
+chromadb==1.5.9
+
+markitdown==0.1.9
+openpyxl==3.1.5
+python-pptx==1.0.2
+pypdf==7.0.0

@@ -1,0 +1,21 @@
+# 云端模型服务依赖 —— Ubuntu 22.04 / CUDA / Python 3.10.x
+# 注意：vllm 与 bge/paddle 必须分属两个 venv，避免 torch 版本互相踩。
+#   venv-vllm   : vllm==0.31.0
+#   venv-models : 本文件其余内容
+
+fastapi==0.162.0
+uvicorn==0.54.0
+pydantic==2.14.3
+httpx==0.28.1
+
+# bge-large-zh-v1.5 / bge-reranker-v2-m3
+FlagEmbedding==1.4.2
+torch==2.14.1
+
+# PaddleOCR（扫描件通道）
+paddlepaddle-gpu==3.3.1
+paddleocr==3.7.0
+pillow>=10.0.0
+
+# 推理引擎（单独 venv）
+vllm==0.31.0

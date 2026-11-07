@@ -1,0 +1,20 @@
+# 本地后端依赖 —— Windows 11 / Python 3.10.12
+# 重要：本文件不含任何模型运行时。torch / paddle / vllm 全部在云端，本地只做 HTTP 调用。
+# 安装：pip install -r backend/requirements-windows.txt
+# 首次成功安装后执行 pip freeze > requirements-windows.lock 并提交
+
+fastapi==0.162.0
+uvicorn==0.54.0
+pydantic==2.14.3
+aiomysql==0.3.2
+PyJWT==2.15.1
+bcrypt==5.0.0
+python-multipart==0.0.32
+httpx==0.28.1
+chromadb==1.5.9
+
+# 文档解析（MarkItDown 的底层依赖，显式钉住避免漂移）
+markitdown==0.1.9
+openpyxl==3.1.5
+python-pptx==1.0.2
+pypdf==7.0.0

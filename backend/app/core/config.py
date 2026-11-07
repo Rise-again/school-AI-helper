@@ -59,6 +59,7 @@ class Settings(BaseModel):
     app_host: str = "127.0.0.1"
     app_port: int = Field(default=8000, ge=1, le=65535)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # MySQL
     mysql_host: str = "127.0.0.1"
@@ -130,6 +131,10 @@ class Settings(BaseModel):
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
 
     @property
     def llm_chat_url(self) -> str:

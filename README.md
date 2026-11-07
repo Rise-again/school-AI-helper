@@ -38,8 +38,18 @@ docs/             需求、版本、架构、库表、接口、部署、测试�
 3. **MySQL 8.0** 本地实例，建库：`CREATE DATABASE campus_assistant DEFAULT CHARSET utf8mb4;`
 4. 复制配置：`copy backend\.env.example backend\.env`，按注释填值（缺必填项服务会拒绝启动）
 5. 装依赖：`pip install -r backend\requirements-windows.txt`
-6. 自检：`python scripts\check_env.py`
-7. 起服务（P1 完成后）：`uvicorn app.main:app --app-dir backend --port 8000`
+6. 建库与演示数据：
+   ```
+   python scripts\migrate.py     :: 建库 + 13 张表
+   python scripts\seed_demo.py   :: 演示账号 admin / 20230001 / 20230002
+   ```
+7. 自检：`python scripts\check_env.py`
+8. 起服务：
+   ```
+   uvicorn app.main:create_app --factory --app-dir backend --port 8000 --reload
+   ```
+   注意必须带 `--factory`：配置在启动时校验，缺项会直接报错并指出变量名。
+   接口文档：http://127.0.0.1:8000/docs
 
 > 本机**不安装** torch / paddle / vllm，也不下载任何模型权重。模型全部在云端，本地只需能访问模型服务地址。
 

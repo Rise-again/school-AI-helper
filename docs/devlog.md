@@ -29,3 +29,32 @@
 1. 域名 + 解析 + 证书 TXT 记录（按 `docs/09` 第 2 节）。
 2. 预算上限取 ¥1200 还是 ¥1800。
 3. 生产机按小时还是包月。
+
+---
+
+## 2026-11-07（周五）· P1 第 1 天
+
+**今天做完**
+- P1-01 数据库设计：13 张表 DDL 落地（`migrations/0001_init.sql`），外键、唯一键、覆盖索引齐备。
+- P1-02 迁移器与种子脚本：`scripts/migrate.py`（支持 `--check`，按 schema_version 增量执行，库名做白名单校验）、`scripts/seed_demo.py`（可重复执行，覆盖式写口令）。
+- P1-03 数据访问层：`db/pool.py`（aiomysql 连接池 + 显式事务 + ping）、`repositories/users.py`、`repositories/conversations.py`。
+- P1-04 基础设施：结构化 JSON 日志 + trace_id 全链路、脱敏函数、错误码体系（9 类）、统一信封、全局异常处理（含 404/405 也走信封）。
+- P1-05 鉴权：bcrypt 口令、HS256 双令牌、登录失败计数与锁定、服务层越权二次校验、角色依赖注入。
+- P1-06 会话接口：列表/新建/详情/重命名/删除/消息分页，越权一律 404。
+- P1-07 测试基线：25 条用例全部通过（配置 8 + 鉴权 9 + 契约 8）；另有 5 条需要真库的集成测试，用 `TEST_MYSQL=1` 才跑。
+
+**实测结果**
+- 起服务（无 MySQL）→ `/healthz` 200、`/readyz` 503 并报出 MySQL 不可用、未带令牌访问 `/me` 返回 2001 信封、参数错误返回 4001 信封、`/openapi.json` 正常。
+- 日志为单行 JSON，同一请求的 trace_id 贯穿中间件与业务。
+
+**注意**
+- 启动命令必须带 `--factory`：`uvicorn app.main:create_app --factory --app-dir backend`，因为配置在启动时校验。
+- 本沙箱没有 MySQL，仓储层与登录流程的**真实数据库验证**要在你本机执行：`migrate → seed → TEST_MYSQL=1 pytest`。
+
+**明天**
+- P1 收口：在本机跑通迁移与集成测试，确认 13 张表结构与索引。
+- 进入 P2：先做 model-service 的最小可跑版本（/v1/embeddings、/v1/rerank、/v1/ocr），再接解析流水线。
+
+**需要你的**
+1. 本机 MySQL 起来后跑一遍 `migrate + seed + TEST_MYSQL=1 pytest`，把报错贴给我。
+2. 云端 CPU 实例（P2 用，跑 bge/OCR 即可，不必 GPU）。

@@ -1,0 +1,1 @@
+"""repositories 层。边界见 docs/03-架构设计.md 第 3 节。"""

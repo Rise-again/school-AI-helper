@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -64,3 +64,29 @@ class PageMeta(BaseModel):
     total: int
     page: int
     size: int
+
+
+class KbFileOut(BaseModel):
+    id: int
+    filename: str
+    file_type: str
+    size_bytes: int
+    parse_channel: str | None = None
+    parse_status: str
+    chunk_count: int = 0
+    version: int = 1
+    source_dept: str | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class KbChunkOut(BaseModel):
+    id: int
+    ordinal: int
+    content: str
+    token_count: int
+    vector_id: str | None = None
+    meta: dict = Field(default_factory=dict)
+    created_at: datetime

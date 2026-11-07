@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -22,10 +23,17 @@ from app.core.config import Settings, get_settings
 from app.core.errors import AppError, ErrorCode
 from app.core.logging import log_fields, new_trace_id, setup_logging, trace_id_var
 from app.db.pool import Database
+from app.rag.embedding import HttpEmbeddingClient
+from app.rag.indexer import Indexer
+from app.rag.ocr import HttpOcrClient
+from app.rag.parser import DocumentParser
+from app.rag.store import ChromaVectorStore, UnavailableVectorStore, VectorStore
 from app.repositories.conversations import ConversationRepository
+from app.repositories.kb import KbRepository
 from app.repositories.users import UserRepository
 from app.services.auth_service import AuthService
 from app.services.conversation_service import ConversationService
+from app.services.kb_service import KbService
 
 logger = logging.getLogger("campus")
 
@@ -44,6 +52,36 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     app.state.auth_service = AuthService(settings, UserRepository(db))
     app.state.conversation_service = ConversationService(ConversationRepository(db))
+
+    kb_repo = KbRepository(db)
+    try:
+        vector_store: VectorStore = await asyncio.to_thread(
+            ChromaVectorStore, settings.chroma_dir, settings.chroma_collection
+        )
+    except Exception as exc:  # noqa: BLE001 - chromadb 缺失/损坏不应导致整个服务起不来
+        logger.error("vector_store_unavailable", extra=log_fields(error=str(exc)[:300]))
+        vector_store = UnavailableVectorStore(str(exc)[:300])
+
+    indexer = Indexer(
+        parser=DocumentParser(
+            HttpOcrClient(settings.ocr_base_url),
+            pdf_mode=settings.parse_pdf_mode,
+            min_chars=settings.ocr_min_chars,
+        ),
+        embedder=HttpEmbeddingClient(settings.embed_base_url, batch_size=settings.embed_batch_size),
+        store=vector_store,
+        repo=kb_repo,
+        target_tokens=settings.chunk_target_tokens,
+        max_tokens=settings.chunk_max_tokens,
+        overlap_tokens=settings.chunk_overlap_tokens,
+    )
+    app.state.kb_service = KbService(
+        settings=settings,
+        repo=kb_repo,
+        indexer=indexer,
+        store=vector_store,
+        upload_dir=settings.upload_dir,
+    )
 
     logger.info("service_started", extra=log_fields(env=settings.app_env, db_connected=db.connected))
     try:

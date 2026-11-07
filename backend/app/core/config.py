@@ -87,11 +87,22 @@ class Settings(BaseModel):
     rerank_base_url: str
     ocr_base_url: str
 
+    # 解析
+    parse_pdf_mode: Literal["page", "markitdown"] = "page"
+    ocr_min_chars: int = Field(default=50, ge=1)
+
+    # 切片（bge 与 reranker 都是 512 token 上限，见计划 3.2 第 2 条）
+    chunk_target_tokens: int = Field(default=400, ge=50)
+    chunk_max_tokens: int = Field(default=480, ge=50)
+    chunk_overlap_tokens: int = Field(default=80, ge=0)
+
     # 检索
     chroma_dir: Path = PROJECT_ROOT / "data" / "chroma"
+    chroma_collection: str = "campus_kb"
     rag_top_k: int = Field(default=20, ge=1, le=200)
     rag_top_n: int = Field(default=5, ge=1, le=50)
     rag_score_threshold: float = Field(default=0.35, ge=0.0, le=1.0)
+    embed_batch_size: int = Field(default=32, ge=1, le=128)
 
     # 数据获取
     anysearch_base_url: str = "https://api.anysearch.com"
@@ -119,6 +130,10 @@ class Settings(BaseModel):
             raise ValueError("JWT_SECRET 仍是占位值，请换成至少 32 位随机字符串")
         if self.rag_top_n > self.rag_top_k:
             raise ValueError("RAG_TOP_N 不能大于 RAG_TOP_K")
+        if self.chunk_target_tokens > self.chunk_max_tokens:
+            raise ValueError("CHUNK_TARGET_TOKENS 不能大于 CHUNK_MAX_TOKENS")
+        if self.chunk_overlap_tokens >= self.chunk_target_tokens:
+            raise ValueError("CHUNK_OVERLAP_TOKENS 必须小于 CHUNK_TARGET_TOKENS")
         if self.mysql_pool_min > self.mysql_pool_max:
             raise ValueError("MYSQL_POOL_MIN 不能大于 MYSQL_POOL_MAX")
         for name in ("llm_base_url", "embed_base_url", "rerank_base_url", "ocr_base_url"):

@@ -58,3 +58,31 @@
 **需要你的**
 1. 本机 MySQL 起来后跑一遍 `migrate + seed + TEST_MYSQL=1 pytest`，把报错贴给我。
 2. 云端 CPU 实例（P2 用，跑 bge/OCR 即可，不必 GPU）。
+
+---
+
+## 2026-11-07（周五）· P2 第 1 天
+
+**今天做完**
+- P2-01 解析：`rag/parser.py`。办公格式走 MarkItDown；PDF 按页抽取文本；**空文本分流**（可见字符 < 50 即判文本层缺失 → 云端 OCR），整篇空则整篇 OCR。这是防止"解析成功但内容为空"的唯一防线。
+- P2-02 切片：`rag/chunker.py`。标题感知、300–480 token、80 token 重叠、表格与代码块整块保留、超长硬拆。
+- P2-03 向量化与入库：`rag/embedding.py`（OpenAI 兼容，批量、维度校验）、`rag/store.py`（Chroma 封装 + 内存替身）、`rag/indexer.py`（解析→切片→向量→写库，按 file_id 先删后写保证幂等）。
+- 知识库接口：`POST/GET /kb/files`、详情、切片分页、重建、删除；异步解析用信号量串行，不引入队列。
+- 测试：44 通过 / 5 跳过（跳过的是需要真库的集成用例）。新增 14 条切片/解析 + 5 条入库编排。
+
+**踩到并修掉的坑**
+- 切片会超出上限 1–2 token：估算函数带 +2 的边界开销，`hard_split` 没预留 → 改为按 `max-2` 分配，并在 emit 时二次校验。
+- `heading_path` 取的是片首标题（太笼统）→ 改为取片尾最具体的标题。
+
+**需要说明的一处取舍**
+- PDF 默认按页抽取（pypdf），不是整篇 MarkItDown。原因：MarkItDown 转 PDF 会丢页码，而引用必须能指到"第几页"。MarkItDown 仍负责 docx/pptx/xlsx/html。若你要求严格只用 MarkItDown，把 `PARSE_PDF_MODE=markitdown` 即可切回（代价是没有页码）。
+
+**还没做**
+- P2-04 检索与重排（需要 embedding/rerank 服务）
+- P2-05 前面的管理接口已通，缺"解析进度实时刷新"的前端配合
+- P2-06 评测集（需要真实文档）
+- `model_service/` 只有契约和依赖，代码未写
+
+**需要你的**
+1. 云端 CPU 实例（跑 bge + OCR，不必 GPU），有了我就能把 model-service 写上去并联调。
+2. 20 份真实文档（含 5 份扫描件、2 份表格），用来做解析成功率验收。

@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # 备份到恒源云「个人数据」（/hy-tmp 关机 24 小时会被清空，必须备份到这里）
 #
-#   bash scripts/backup.sh --full    # 首次 / 环境变更后：venv + 模型 + 代码 + 数据库
+#   bash scripts/backup.sh --full    # 首次 / 环境变更后：venv + 代码 + 数据 + 自训模型
 #   bash scripts/backup.sh           # 日常：只备数据库、上传文件、.env（几 MB，可每天跑）
+#   bash scripts/backup.sh --full --with-models   # 连公开基座模型一起传（约 18G，一般不必）
 #   bash scripts/backup.sh --prune   # 清理远端旧备份，只留最近 5 份
+#
+# 为什么不默认备模型：Qwen2.5-7B 与两个 bge 都能从 ModelScope 重新下载（约 7 分钟），
+# 传 18G 反而更慢。但 models/adapters 下的微调产物无法重下，永远会备。
 #
 # 前提：先在本机执行一次 `oss login`。
 # bucket 自动取 `oss ls` 的第一个；也可用 OSS_BUCKET=oss://xxx 指定。
@@ -15,10 +19,12 @@ BACKUP_DIR="$DATA_ROOT/backup"
 STAMP="$(date +%F-%H%M)"
 MODE="daily"
 PRUNE=0
+WITH_MODELS=0
 
 for arg in "$@"; do
   case "$arg" in
     --full)  MODE="full" ;;
+    --with-models) WITH_MODELS=1 ;;
     --prune) PRUNE=1 ;;
     -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "未知参数：$arg" >&2; exit 2 ;;
@@ -59,11 +65,28 @@ dump_db() {
 # ---------- 小件：代码 + 上传文件 ----------
 pack_small() {
   local out="$BACKUP_DIR/appdata-$STAMP.tgz"
+  # app 里含代码与 .env；data 里含上传文件与向量库（同在 $DATA_ROOT 下，是兄弟目录）
   tar czf "$out" -C "$DATA_ROOT" \
       --exclude='app/backend/.venv' --exclude='app/.git' \
-      app/data app/backend/.env 2>/dev/null || tar czf "$out" -C "$DATA_ROOT" \
-      --exclude='app/backend/.venv' app 2>/dev/null || true
-  [ -f "$out" ] && ok "代码与上传文件 $(du -h "$out" | cut -f1)"
+      app data
+  ok "代码与上传文件 $(du -h "$out" | cut -f1)"
+  echo "$out"
+}
+
+# ---------- 自训产物（无法从网上下回来的东西） ----------
+pack_custom() {
+  local paths=()
+  [ -d "$DATA_ROOT/models/adapters" ] && paths+=("models/adapters")
+  [ -d "$DATA_ROOT/data/training" ]   && paths+=("data/training")
+  [ -d "$DATA_ROOT/data/sft" ]        && paths+=("data/sft")
+  if [ "${#paths[@]}" -eq 0 ]; then
+    echo "  · 暂无微调产物（models/adapters、data/training、data/sft 都不存在）"
+    echo ""
+    return 0
+  fi
+  local out="$BACKUP_DIR/custom-$STAMP.tgz"
+  tar czf "$out" -C "$DATA_ROOT" "${paths[@]}"
+  ok "微调产物 $(du -h "$out" | cut -f1)"
   echo "$out"
 }
 
@@ -89,11 +112,19 @@ if [ "$MODE" = "full" ]; then
   DB="$(dump_db | tail -1)"
   SMALL="$(pack_small | tail -1)"
   VENV="$(pack_venvs | tail -1)"
+  CUSTOM="$(pack_custom | tail -1)"
   upload "$DB"; upload "$SMALL"; upload "$VENV"
+  [ -n "$CUSTOM" ] && upload "$CUSTOM"
 
-  echo "  上传模型（18G，大文件直传，可断点续传）..."
-  oss cp -r "$DATA_ROOT/models" "$OSS_ROOT/" >/dev/null
-  ok "模型已上传"
+  if [ "$WITH_MODELS" -eq 1 ]; then
+    echo "  上传公开基座模型（18G，大文件直传，可断点续传）..."
+    oss cp -r "$DATA_ROOT/models" "$OSS_ROOT/" >/dev/null
+    ok "模型已上传"
+    MODELS_NOTE="included"
+  else
+    echo "  · 跳过公开模型（可用 scripts/fetch_models.sh 重新下载）"
+    MODELS_NOTE="public-skip"
+  fi
 
   cat > "$BACKUP_DIR/manifest-$STAMP.txt" <<EOF
 backup=$STAMP
@@ -101,7 +132,8 @@ mode=full
 db=$(basename "${DB:-none}")
 appdata=$(basename "${SMALL:-none}")
 venvs=$(basename "${VENV:-none}")
-models=models/
+custom=$(basename "${CUSTOM:-none}")
+models=$MODELS_NOTE
 EOF
   upload "$BACKUP_DIR/manifest-$STAMP.txt"
 else

@@ -2,7 +2,9 @@
 # 从个人数据恢复（换实例、/hy-tmp 被清空后使用）
 #
 #   bash scripts/restore.sh --timestamp 2026-11-08-1200          # 日常件（代码+数据+数据库）
-#   bash scripts/restore.sh --timestamp 2026-11-08-1200 --full   # 连虚拟环境和模型一起
+#   bash scripts/restore.sh --timestamp 2026-11-08-1200 --full   # 连虚拟环境与自训模型一起
+#
+# 备份里通常不含公开基座模型：恢复时若发现缺失，会自动调 scripts/fetch_models.sh 重新下载。
 #
 # 流程：下载 → 停服务 → 旧目录改名备份 → 解包 → 恢复数据库 → 启动 → 自检
 # 任何一步失败，脚本会尝试把旧目录改回来，不会留下半套环境。
@@ -44,8 +46,10 @@ oss cp "$OSS_ROOT/db-$STAMP.sql.gz" "$STAGE/" >/dev/null 2>&1 || die "找不到 
 oss cp "$OSS_ROOT/appdata-$STAMP.tgz" "$STAGE/" >/dev/null 2>&1 || true
 if [ "$FULL" -eq 1 ]; then
   oss cp "$OSS_ROOT/venvs-$STAMP.tgz" "$STAGE/" >/dev/null 2>&1 || die "找不到 venvs-$STAMP.tgz"
-  oss cp -r "$OSS_ROOT/models" "$STAGE/" >/dev/null 2>&1 || die "下载模型失败"
+  # 公开基座模型只有 --with-models 备份时才有，没有就走下载
+  oss cp -r "$OSS_ROOT/models" "$STAGE/" >/dev/null 2>&1 || true
 fi
+oss cp "$OSS_ROOT/custom-$STAMP.tgz" "$STAGE/" >/dev/null 2>&1 || true
 ok "下载完成（$(du -sh "$STAGE" | cut -f1)）"
 
 # ---------- 2 停服务 ----------
@@ -87,9 +91,20 @@ else
   # 没有 appdata 包时至少把代码拉回来（仓库随时可 clone）
   echo "  ! 没有 appdata 包含代码，请手动 git clone 到 $DATA_ROOT/app"
 fi
+if [ "$FULL" -eq 1 ] && [ -f "$STAGE/custom-$STAMP.tgz" ]; then
+  tar -xzf "$STAGE/custom-$STAMP.tgz" -C "$DATA_ROOT"
+  ok "微调产物已恢复"
+fi
 if [ "$FULL" -eq 1 ] && [ -d "$STAGE/models" ]; then
-  mv "$STAGE/models" "$DATA_ROOT/models"
-  ok "模型已恢复"
+  mkdir -p "$DATA_ROOT/models"
+  cp -r "$STAGE/models/." "$DATA_ROOT/models/" 2>/dev/null || true
+  ok "备份内的模型已恢复"
+fi
+
+# 公开基座模型若缺失，重新下载（约 7 分钟）
+if [ "$FULL" -eq 1 ] && [ ! -f "$DATA_ROOT/models/qwen2.5-7b-instruct/config.json" ]; then
+  echo "  ↓ 本地缺少基座模型，从 ModelScope 下载（约 7 分钟）"
+  VENV_DIR="$DATA_ROOT/venvs" MODEL_DIR="$DATA_ROOT/models" bash "$REPO_ROOT/scripts/fetch_models.sh"
 fi
 
 # ---------- 5 恢复数据库 ----------

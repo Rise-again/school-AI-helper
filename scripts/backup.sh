@@ -142,7 +142,8 @@ venvs=$(basename "${VENV:-none}")
 custom=$(basename "${CUSTOM:-none}")
 models=$MODELS_NOTE
 EOF
-  upload "$BACKUP_DIR/manifest-$STAMP.txt"
+  gzip -f "$BACKUP_DIR/manifest-$STAMP.txt"   # oss 只收白名单后缀，.txt 传不上去
+  upload "$BACKUP_DIR/manifest-$STAMP.txt.gz"
 else
   DB="$(dump_db | tail -1)"
   SMALL="$(pack_small | tail -1)"
@@ -165,7 +166,7 @@ if [ "$PRUNE" -eq 1 ]; then
   echo "清理远端旧备份（保留最近 5 份）..."
   for prefix in db- appdata- venvs- manifest-; do
     oss ls "$OSS_ROOT/" 2>/dev/null | grep "$prefix" | sort | head -n -5 | awk '{print $NF}' \
-      | while read -r obj; do [ -n "$obj" ] && oss rm "$obj" >/dev/null 2>&1 || true; done
+      | while read -r obj; do [ -n "$obj" ] && oss rm -f "$obj" >/dev/null 2>&1 || true; done
   done
   ok "清理完成"
 fi

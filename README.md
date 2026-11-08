@@ -18,7 +18,7 @@
 
 ## 技术栈（冻结，不得替换）
 
-Python 3.10（conda）｜ Vue 3 + Vite + Element Plus ｜ **Ubuntu 20.04**（选题 PPT 写的是 22.04，因平台限制调整，见 D-07）｜ PaddleOCR + MarkItDown ｜ 正方教务 SDK（school-sdk）+ AnySearch API ｜ FastAPI + Uvicorn + Pydantic ｜ MySQL ｜ Qwen2.5-7B-Instruct ｜ Llama-Factory + QLoRA-SFT ｜ vLLM ｜ LangGraph ｜ bge-large-zh-v1.5 + bge-reranker-v2-m3 + ChromaDB
+Python 3.11 ｜ Vue 3 + Vite + Element Plus ｜ Ubuntu 22.04 LTS ｜ PaddleOCR + MarkItDown ｜ 正方教务 SDK（school-sdk）+ AnySearch API ｜ FastAPI + Uvicorn + Pydantic ｜ MySQL ｜ Qwen2.5-7B-Instruct ｜ Llama-Factory + QLoRA-SFT ｜ vLLM ｜ LangGraph ｜ bge-large-zh-v1.5 + bge-reranker-v2-m3 + ChromaDB
 
 ## 目录
 

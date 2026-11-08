@@ -39,9 +39,8 @@ if ! oss ls >/dev/null 2>&1; then
   die "oss 未登录。先在服务器上执行：oss login"
 fi
 
-OSS_BUCKET="${OSS_BUCKET:-$(oss ls 2>/dev/null | awk '{print $1}' | grep -m1 '^oss://' || true)}"
-[ -n "$OSS_BUCKET" ] || die "找不到 bucket，请用 OSS_BUCKET=oss://xxx 指定"
-OSS_ROOT="${OSS_BUCKET%/}/campus"
+# 恒源云「个人数据」没有 bucket 名，oss:// 就是根；这里统一放到 campus/ 前缀下
+OSS_ROOT="${OSS_ROOT:-oss://campus}"
 mkdir -p "$BACKUP_DIR"
 
 echo "备份模式：$MODE"
@@ -57,14 +56,21 @@ dump_db() {
   pass="$(grep -E '^MYSQL_PASSWORD=' "$env_file" | cut -d= -f2-)"
   db="$(grep -E '^MYSQL_DB=' "$env_file" | cut -d= -f2-)"
   local out="$BACKUP_DIR/db-$STAMP.sql.gz"
-  mysqldump --single-transaction --quick -u"$user" -p"$pass" "$db" 2>/dev/null | gzip > "$out"
+  # 必须走 TCP（授权是 campus@127.0.0.1）；--no-tablespaces 避免要求 PROCESS 权限
+  if ! mysqldump --single-transaction --quick --no-tablespaces \
+       -h127.0.0.1 -u"$user" -p"$pass" "$db" 2>"$BACKUP_DIR/dump.err" | gzip > "$out"; then
+    echo "  ✗ 数据库导出失败：$(head -2 "$BACKUP_DIR/dump.err" | tr '\n' ' ')"
+    rm -f "$out"
+    return 0
+  fi
+  [ "$(stat -c%s "$out")" -lt 1000 ] && { echo "  ✗ 导出文件异常小（$out）"; rm -f "$out"; return 0; }
   ok "数据库 $(du -h "$out" | cut -f1)"
   echo "$out"
 }
 
 # ---------- 小件：代码 + 上传文件 ----------
 pack_small() {
-  local out="$BACKUP_DIR/appdata-$STAMP.tgz"
+  local out="$BACKUP_DIR/appdata-$STAMP.tar.gz"
   # app 里含代码与 .env；data 里含上传文件与向量库（同在 $DATA_ROOT 下，是兄弟目录）
   tar czf "$out" -C "$DATA_ROOT" \
       --exclude='app/backend/.venv' --exclude='app/.git' \
@@ -84,7 +90,7 @@ pack_custom() {
     echo ""
     return 0
   fi
-  local out="$BACKUP_DIR/custom-$STAMP.tgz"
+  local out="$BACKUP_DIR/custom-$STAMP.tar.gz"
   tar czf "$out" -C "$DATA_ROOT" "${paths[@]}"
   ok "微调产物 $(du -h "$out" | cut -f1)"
   echo "$out"
@@ -92,7 +98,7 @@ pack_custom() {
 
 # ---------- 大件：虚拟环境 ----------
 pack_venvs() {
-  local out="$BACKUP_DIR/venvs-$STAMP.tgz"
+  local out="$BACKUP_DIR/venvs-$STAMP.tar.gz"
   echo "  打包 venvs（13G，约 5–10 分钟）..."
   tar -I 'gzip -1' -cf "$out" -C "$DATA_ROOT" venvs
   ok "虚拟环境 $(du -h "$out" | cut -f1)"
@@ -103,7 +109,7 @@ upload() {
   local file="$1"
   [ -f "$file" ] || return 0
   echo "  ↑ $(basename "$file")"
-  oss cp "$file" "$OSS_ROOT/" >/dev/null
+  oss cp "$file" "$OSS_ROOT/$(basename "$file")" >/dev/null
   ok "已上传 $(basename "$file")"
 }
 
@@ -117,8 +123,9 @@ if [ "$MODE" = "full" ]; then
   [ -n "$CUSTOM" ] && upload "$CUSTOM"
 
   if [ "$WITH_MODELS" -eq 1 ]; then
-    echo "  上传公开基座模型（18G，大文件直传，可断点续传）..."
-    oss cp -r "$DATA_ROOT/models" "$OSS_ROOT/" >/dev/null
+    echo "  打包并上传公开基座模型（18G，oss 只收压缩包，约 10 分钟）..."
+    tar -I "gzip -1" -cf "$BACKUP_DIR/models-$STAMP.tar.gz" -C "$DATA_ROOT" models
+    upload "$BACKUP_DIR/models-$STAMP.tar.gz"
     ok "模型已上传"
     MODELS_NOTE="included"
   else
@@ -143,9 +150,16 @@ else
 fi
 
 # 本地只留最近 3 份，别把数据盘塞满
-ls -1t "$BACKUP_DIR"/db-*.sql.gz 2>/dev/null | tail -n +4 | xargs -r rm -f
-ls -1t "$BACKUP_DIR"/appdata-*.tgz 2>/dev/null | tail -n +4 | xargs -r rm -f
-ls -1t "$BACKUP_DIR"/venvs-*.tgz 2>/dev/null | tail -n +2 | xargs -r rm -f
+# 本地只留最近几份（通配符没匹配到时不要让 set -e 中止脚本）
+prune_local() {
+  local pattern="$1" keep="$2"
+  ls -1t $pattern 2>/dev/null | tail -n +$((keep + 1)) | xargs -r rm -f || true
+}
+prune_local "$BACKUP_DIR"/db-*.sql.gz 3
+prune_local "$BACKUP_DIR"/appdata-*.tar.gz 3
+prune_local "$BACKUP_DIR"/custom-*.tar.gz 3
+prune_local "$BACKUP_DIR"/venvs-*.tar.gz 2
+prune_local "$BACKUP_DIR"/models-*.tar.gz 1
 
 if [ "$PRUNE" -eq 1 ]; then
   echo "清理远端旧备份（保留最近 5 份）..."

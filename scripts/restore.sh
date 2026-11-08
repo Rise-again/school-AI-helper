@@ -32,9 +32,7 @@ die() { printf '\033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
 command -v oss >/dev/null || die "缺少 oss 命令"
 oss ls >/dev/null 2>&1 || die "oss 未登录，先执行 oss login"
 
-OSS_BUCKET="${OSS_BUCKET:-$(oss ls 2>/dev/null | awk '{print $1}' | grep -m1 '^oss://' || true)}"
-[ -n "$OSS_BUCKET" ] || die "找不到 bucket，请用 OSS_BUCKET=oss://xxx 指定"
-OSS_ROOT="${OSS_BUCKET%/}/campus"
+OSS_ROOT="${OSS_ROOT:-oss://campus}"
 
 STAGE="$DATA_ROOT/restore-$STAMP"
 mkdir -p "$STAGE"
@@ -43,13 +41,13 @@ echo "恢复点：$STAMP（$([ "$FULL" -eq 1 ] && echo 全量 || echo 日常)）
 # ---------- 1 下载 ----------
 echo "[1/6] 下载"
 oss cp "$OSS_ROOT/db-$STAMP.sql.gz" "$STAGE/" >/dev/null 2>&1 || die "找不到 db-$STAMP.sql.gz"
-oss cp "$OSS_ROOT/appdata-$STAMP.tgz" "$STAGE/" >/dev/null 2>&1 || true
+oss cp "$OSS_ROOT/appdata-$STAMP.tar.gz" "$STAGE/" >/dev/null 2>&1 || true
 if [ "$FULL" -eq 1 ]; then
-  oss cp "$OSS_ROOT/venvs-$STAMP.tgz" "$STAGE/" >/dev/null 2>&1 || die "找不到 venvs-$STAMP.tgz"
+  oss cp "$OSS_ROOT/venvs-$STAMP.tar.gz" "$STAGE/" >/dev/null 2>&1 || die "找不到 venvs-$STAMP.tar.gz"
   # 公开基座模型只有 --with-models 备份时才有，没有就走下载
-  oss cp -r "$OSS_ROOT/models" "$STAGE/" >/dev/null 2>&1 || true
+  oss cp "$OSS_ROOT/models-$STAMP.tar.gz" "$STAGE/" >/dev/null 2>&1 || true
 fi
-oss cp "$OSS_ROOT/custom-$STAMP.tgz" "$STAGE/" >/dev/null 2>&1 || true
+oss cp "$OSS_ROOT/custom-$STAMP.tar.gz" "$STAGE/" >/dev/null 2>&1 || true
 ok "下载完成（$(du -sh "$STAGE" | cut -f1)）"
 
 # ---------- 2 停服务 ----------
@@ -80,24 +78,24 @@ trap 'echo "解包失败，正在回滚..."; rollback' ERR
 
 # ---------- 4 解包 ----------
 echo "[4/6] 解包"
-if [ "$FULL" -eq 1 ] && [ -f "$STAGE/venvs-$STAMP.tgz" ]; then
-  tar -xzf "$STAGE/venvs-$STAMP.tgz" -C "$DATA_ROOT"
+if [ "$FULL" -eq 1 ] && [ -f "$STAGE/venvs-$STAMP.tar.gz" ]; then
+  tar -xzf "$STAGE/venvs-$STAMP.tar.gz" -C "$DATA_ROOT"
   ok "虚拟环境已恢复"
 fi
-if [ -f "$STAGE/appdata-$STAMP.tgz" ]; then
-  tar -xzf "$STAGE/appdata-$STAMP.tgz" -C "$DATA_ROOT"
+if [ -f "$STAGE/appdata-$STAMP.tar.gz" ]; then
+  tar -xzf "$STAGE/appdata-$STAMP.tar.gz" -C "$DATA_ROOT"
   ok "代码与上传文件已恢复"
 else
   # 没有 appdata 包时至少把代码拉回来（仓库随时可 clone）
   echo "  ! 没有 appdata 包含代码，请手动 git clone 到 $DATA_ROOT/app"
 fi
-if [ "$FULL" -eq 1 ] && [ -f "$STAGE/custom-$STAMP.tgz" ]; then
-  tar -xzf "$STAGE/custom-$STAMP.tgz" -C "$DATA_ROOT"
+if [ "$FULL" -eq 1 ] && [ -f "$STAGE/custom-$STAMP.tar.gz" ]; then
+  tar -xzf "$STAGE/custom-$STAMP.tar.gz" -C "$DATA_ROOT"
   ok "微调产物已恢复"
 fi
-if [ "$FULL" -eq 1 ] && [ -d "$STAGE/models" ]; then
+if [ "$FULL" -eq 1 ] && [ -f "$STAGE/models-$STAMP.tar.gz" ]; then
   mkdir -p "$DATA_ROOT/models"
-  cp -r "$STAGE/models/." "$DATA_ROOT/models/" 2>/dev/null || true
+  tar -xzf "$STAGE/models-$STAMP.tar.gz" -C "$DATA_ROOT"
   ok "备份内的模型已恢复"
 fi
 
@@ -118,8 +116,8 @@ if [ -f "$ENV_FILE" ]; then
   U="$(grep -E '^MYSQL_USER=' "$ENV_FILE" | cut -d= -f2-)"
   P="$(grep -E '^MYSQL_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
   DB="$(grep -E '^MYSQL_DB=' "$ENV_FILE" | cut -d= -f2-)"
-  mysql -u"$U" -p"$P" -e "CREATE DATABASE IF NOT EXISTS \`$DB\` DEFAULT CHARSET utf8mb4;" 2>/dev/null
-  gunzip -c "$STAGE/db-$STAMP.sql.gz" | mysql -u"$U" -p"$P" "$DB" 2>/dev/null
+  mysql -h127.0.0.1 -u"$U" -p"$P" -e "CREATE DATABASE IF NOT EXISTS \`$DB\` DEFAULT CHARSET utf8mb4;" 2>/dev/null
+  gunzip -c "$STAGE/db-$STAMP.sql.gz" | mysql -h127.0.0.1 -u"$U" -p"$P" "$DB" 2>/dev/null
   ok "数据库已恢复"
 else
   echo "  ! 没有 .env，跳过数据库恢复（请手动配置后运行 migrate）"

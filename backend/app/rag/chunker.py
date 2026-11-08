@@ -33,10 +33,19 @@ class _Block:
     heading_path: str
     page_no: int | None
     tokens: int
+    is_heading: bool = False
 
 
-def _make_block(text: str, heading_path: str, page_no: int | None) -> _Block:
-    return _Block(text=text, heading_path=heading_path, page_no=page_no, tokens=estimate_tokens(text))
+def _make_block(
+    text: str, heading_path: str, page_no: int | None, *, is_heading: bool = False
+) -> _Block:
+    return _Block(
+        text=text,
+        heading_path=heading_path,
+        page_no=page_no,
+        tokens=estimate_tokens(text),
+        is_heading=is_heading,
+    )
 
 
 def _blocks_from_page(text: str, page_no: int | None, stack: list[str]) -> list[_Block]:
@@ -72,7 +81,7 @@ def _blocks_from_page(text: str, page_no: int | None, stack: list[str]) -> list[
             if level <= len(stack):
                 del stack[level - 1 :]
             stack.append(title)
-            blocks.append(_make_block(title, " > ".join(stack), page_no))
+            blocks.append(_make_block(title, " > ".join(stack), page_no, is_heading=True))
             continue
 
         if not line.strip():
@@ -128,7 +137,7 @@ def chunk_pages(
                     )
                 )
 
-    def flush() -> None:
+    def flush(keep_overlap: bool = True) -> None:
         nonlocal current, current_tokens
         if not current:
             return
@@ -138,12 +147,19 @@ def chunk_pages(
             return
         # 最具体的标题 + 起始页码
         emit(content, current[-1].heading_path, current[0].page_no)
+        if not keep_overlap:
+            current, current_tokens = [], 0
+            return
         tail = tail_by_tokens(content, overlap_tokens)
         current = [_make_block(tail, current[-1].heading_path, current[0].page_no)] if tail else []
         current_tokens = estimate_tokens(tail) if tail else 0
 
     for block in blocks:
-        if current and current_tokens + block.tokens > target_tokens:
+        # 标题是天然的语义边界：已经有正文时遇到新标题就直接切，且不带重叠
+        # （跨章节的重叠会把上一章的内容混进新章节，反而拉低重排分数）
+        if block.is_heading and any(not b.is_heading for b in current):
+            flush(keep_overlap=False)
+        elif current and current_tokens + block.tokens > target_tokens:
             flush()
         current.append(block)
         current_tokens += block.tokens

@@ -71,3 +71,15 @@ def test_page_numbers_propagate():
 def test_empty_input():
     assert chunk_pages([]) == []
     assert chunk_pages([(None, "   ")]) == []
+
+
+def test_sections_split_at_headings():
+    """标题是硬边界：跨章节合并会拉低重排分数（实测 0.12 被阈值挡掉）。"""
+    body_a = "第一条 新生持录取通知书按期到校办理入学手续，因故不能按期入学者应当请假。" * 8
+    body_b = "第四条 考试作弊的，该课程成绩记为零分，并视情节给予记过以上处分。" * 8
+    text = f"# 第一章 入学\n\n{body_a}\n\n# 第二章 考试\n\n{body_b}"
+    chunks = chunk_pages([(None, text)], target_tokens=400, max_tokens=480, overlap_tokens=80)
+    assert len(chunks) >= 2
+    assert any(c.heading_path == "第二章 考试" for c in chunks)
+    for chunk in chunks:
+        assert not ("第一条" in chunk.content and "第四条" in chunk.content)

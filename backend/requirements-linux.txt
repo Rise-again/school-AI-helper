@@ -6,6 +6,7 @@ fastapi==0.162.0
 uvicorn==0.54.0
 pydantic==2.14.3
 aiomysql==0.3.2
+cryptography>=46.0.0   # MySQL 8 caching_sha2_password 认证必需
 PyJWT==2.15.1
 bcrypt==5.0.0
 python-multipart==0.0.32

@@ -109,3 +109,31 @@
 **我这边等的东西**
 1. SSH 地址 / 端口 / 密钥路径
 2. 20 份真实文档（P2-06 评测集 + 解析成功率验收）
+
+---
+
+## 2026-11-08（周六）· 服务器联调（P0–P2 收口）
+
+**实例实测**
+- Ubuntu **22.04.5**（不是 20.04，D-07 撤销，与选题 PPT 一致）、RTX 4090 **24GB**（24564 MiB）、驱动 570.211.01、CUDA 12.8、Python 3.11.12、/hy-tmp 100G。
+
+**跑通了什么**
+- MySQL 8.0.46 装好并启动；`migrate` 建 13 张表；`seed` 写入 3 个演示账号；**5 条集成测试全过**（P1 收口）。
+- vLLM 0.11.0 服务 7B：显存占 17.2G，一次问答 0.9 秒。
+- model-service：embedding 1024 维、rerank 正常（作弊题 0.825）、OCR 已装（CPU 通道）。
+- 后端 8080：`/readyz` 三项（mysql / llm / models）全 ok。
+- **端到端**：上传《学籍管理规定》→ 解析 → 切片 3 段 → 向量入库 → 检索"考试作弊怎么处理" 命中 0.872，带章节与原文链接。
+
+**踩坑与修正**
+1. `python3 -m venv` 缺 ensurepip → 全面改用 virtualenv。
+2. MySQL 8 caching_sha2 认证缺 `cryptography` → 补进两份 requirements。
+3. `aiomysql` 0.3.x 不再导出 `constants` → `migrate.py` 改从 `pymysql.constants` 取。
+4. vLLM 0.31 拉 torch 2.13+cu130，驱动 570 带不动（`cuda_available=False`）→ 降到 0.11.0（torch 2.8+cu128）。
+5. vLLM 0.11 与 transformers 5.x 冲突（Qwen2Tokenizer 报错）→ 钉 4.57.1。
+6. FlagEmbedding 1.4.2 `encode()` 不认 `normalize_embeddings` → 自己 L2 归一化。
+7. **切片不按标题切**：整篇 3 章并成 1 片，重排只有 0.12 分被阈值挡掉 → 改为"标题是硬边界、且不带重叠"，重排升到 0.872。这是今天最有价值的一次修正。
+
+**还没做**
+- P2-06 评测集（需要 20 份真实文档）
+- P0-08 备份镜像（依赖装完了，可以在控制台创建）、自定义服务链接（需你在控制台点开）
+- 数据备份脚本、systemd 托管（属 P9，但建议早做）

@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 import aiomysql
-from aiomysql.constants import CLIENT
+from pymysql.constants import CLIENT  # aiomysql 0.3.x 不再导出 constants
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))

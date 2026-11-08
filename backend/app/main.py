@@ -11,6 +11,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -215,15 +216,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/readyz", include_in_schema=False)
     async def readyz(request: Request) -> JSONResponse:
         db: Database = request.app.state.db
+        cfg: Settings = request.app.state.settings
+
+        async def probe(url: str) -> bool:
+            try:
+                async with httpx.AsyncClient(timeout=2.5) as client:
+                    resp = await client.get(url)
+                    return resp.status_code < 500
+            except Exception:  # noqa: BLE001 - 探针只需要布尔结果
+                return False
+
         mysql_ok = await db.ping()
+        llm_ok = await probe(f"{cfg.llm_base_url.rstrip('/')}/models")
+        models_ok = await probe(f"{cfg.ocr_base_url.rstrip('/')}/healthz")
+        ok = mysql_ok and llm_ok and models_ok
         body = {
-            "status": "ok" if mysql_ok else "degraded",
+            "status": "ok" if ok else "degraded",
             "components": {
                 "mysql": "ok" if mysql_ok else (db.last_error or "down"),
-                "models": "pending",  # P2 起接入 model-service /healthz
+                "llm": "ok" if llm_ok else "down",
+                "models": "ok" if models_ok else "down",
             },
         }
-        return JSONResponse(status_code=200 if mysql_ok else 503, content=body)
+        return JSONResponse(status_code=200 if ok else 503, content=body)
 
     @app.get("/", include_in_schema=False)
     async def root() -> dict:

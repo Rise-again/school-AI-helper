@@ -80,8 +80,10 @@ class LocalBackend:
     # ---------- 推理 ----------
     def embed(self, texts: list[str]) -> list[list[float]]:
         model = self._get_embed()
-        vectors = model.encode(texts, normalize_embeddings=True, batch_size=16)
-        return [[float(x) for x in vec] for vec in vectors]
+        # FlagEmbedding 1.4.x 的 encode() 不认 normalize_embeddings（会透传给 tokenizer.pad 报错），
+        # 这里取原始向量后自己 L2 归一化，保证入库与查询口径一致。
+        vectors = model.encode(texts, batch_size=16)
+        return [_l2_normalize([float(x) for x in vec]) for vec in vectors]
 
     def rerank(self, query: str, passages: list[str]) -> list[float]:
         model = self._get_rerank()
@@ -106,6 +108,13 @@ class LocalBackend:
             "rerank": "loaded" if self._rerank_model else self._errors.get("rerank", "not_loaded"),
             "ocr": "loaded" if self._ocr_model else self._errors.get("ocr", "not_loaded"),
         }
+
+
+def _l2_normalize(vec: list[float]) -> list[float]:
+    import math
+
+    norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+    return [x / norm for x in vec]
 
 
 def _rasterize(path: Path, pages: list[int] | None) -> list[tuple[int, object]]:

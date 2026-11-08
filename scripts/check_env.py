@@ -145,8 +145,11 @@ def check_disk() -> None:
     add(OK if free_gb >= 10 else WARN, "磁盘余量", f"{free_gb:.1f} GB（建议 >=10GB）")
 
 
-def check_ports() -> None:
-    for port, label in ((8000, "后端"), (5173, "前端")):
+def check_ports(env: dict[str, str] | None = None) -> None:
+    app_port = 8080
+    if env and env.get("APP_PORT", "").isdigit():
+        app_port = int(env["APP_PORT"])
+    for port, label in ((app_port, "后端"), (5173, "前端")):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
@@ -206,7 +209,7 @@ def main() -> int:
     check_mysql(env)
     check_model_endpoints(env)
     check_disk()
-    check_ports()
+    check_ports(env)
     check_dirs()
     check_gpu()
     check_git()

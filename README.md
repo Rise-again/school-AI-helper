@@ -21,8 +21,10 @@ bash install.sh
 ```bash
 bash install.sh --skip-models   # 先不下载模型（之后跑 scripts/fetch_models.sh）
 bash install.sh --skip-db       # 不动数据库
-DATA_ROOT=/data/campus bash install.sh   # 换数据目录（默认 /hy-tmp/campus）
+DATA_ROOT=/opt/campus bash install.sh    # 换数据目录
 ```
+
+> 默认数据目录是 `/hy-tmp/campus`（恒源云的数据盘）。其它环境请用 `DATA_ROOT` 指到自己的大盘，例如 `DATA_ROOT=/opt/campus`——模型和虚拟环境加起来约 30GB，不要放系统盘。
 
 装完启动：
 

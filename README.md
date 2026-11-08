@@ -84,6 +84,8 @@ docs/                    需求、版本、架构、库表、接口、部署、�
 | `bash scripts/start.sh` | 启动全部服务（已在跑的跳过） |
 | `bash scripts/stop.sh` | 停止全部服务 |
 | `bash scripts/fetch_models.sh` | 补下模型 |
+| `bash scripts/backup.sh --full` | 备份到恒源云「个人数据」（需先 `oss login`） |
+| `bash scripts/restore.sh --timestamp <时间戳> --full` | 从备份恢复 |
 | `python scripts/check_env.py` | 环境自检 |
 | `cd backend && pytest` | 后端测试（55 条；加 `TEST_MYSQL=1` 跑 5 条真库用例） |
 | `cd model_service && pytest` | 模型服务契约测试（8 条） |

@@ -76,6 +76,7 @@ class KbFileOut(BaseModel):
     chunk_count: int = 0
     version: int = 1
     source_dept: str | None = None
+    source_url: str | None = None
     effective_from: date | None = None
     effective_to: date | None = None
     created_at: datetime

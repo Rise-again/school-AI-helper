@@ -14,6 +14,7 @@ from app.core.security import decode_token
 from app.db.pool import Database
 from app.services.auth_service import AuthService
 from app.services.conversation_service import ConversationService
+from app.rag.retriever import Retriever
 from app.services.kb_service import KbService
 
 _bearer = HTTPBearer(auto_error=False)
@@ -37,6 +38,10 @@ def get_conversation_service(request: Request) -> ConversationService:
 
 def get_kb_service(request: Request) -> KbService:
     return request.app.state.kb_service
+
+
+def get_retriever(request: Request) -> Retriever:
+    return request.app.state.retriever
 
 
 @dataclass(frozen=True)

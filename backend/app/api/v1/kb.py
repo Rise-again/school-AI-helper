@@ -51,6 +51,7 @@ def _chunk_payload(row: dict) -> dict:
 async def upload_file(
     file: UploadFile = File(...),
     source_dept: str | None = Form(default=None),
+    source_url: str | None = Form(default=None),
     effective_from: str | None = Form(default=None),
     effective_to: str | None = Form(default=None),
     admin: CurrentUser = Depends(_admin),
@@ -64,6 +65,7 @@ async def upload_file(
         content=content,
         uploaded_by=admin.id,
         source_dept=source_dept,
+        source_url=source_url,
         effective_from=_parse_date(effective_from, "effective_from"),
         effective_to=_parse_date(effective_to, "effective_to"),
     )

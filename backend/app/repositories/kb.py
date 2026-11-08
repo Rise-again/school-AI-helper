@@ -27,6 +27,7 @@ class KbRepository:
         file_type: str,
         size_bytes: int,
         source_dept: str | None,
+        source_url: str | None = None,
         effective_from: str | None,
         effective_to: str | None,
         uploaded_by: int | None,
@@ -34,19 +35,35 @@ class KbRepository:
         async with self._db.cursor() as cur:
             await cur.execute(
                 "INSERT INTO kb_file (filename, file_hash, file_type, size_bytes, source_dept, "
-                "effective_from, effective_to, uploaded_by) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                "source_url, effective_from, effective_to, uploaded_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     filename,
                     file_hash,
                     file_type,
                     size_bytes,
                     source_dept,
+                    source_url,
                     effective_from,
                     effective_to,
                     uploaded_by,
                 ),
             )
             return int(cur.lastrowid)
+
+    async def get_files_by_ids(self, file_ids: list[int]) -> dict[int, dict[str, Any]]:
+        """批量取文件记录（检索后过滤时效/拼接引用用），返回 id -> 记录。"""
+        if not file_ids:
+            return {}
+        placeholders = ", ".join(["%s"] * len(file_ids))
+        sql = (
+            f"SELECT id, filename, file_type, source_dept, source_url, effective_from, "
+            f"effective_to, parse_status, deleted_at FROM kb_file WHERE id IN ({placeholders})"
+        )
+        async with self._db.cursor() as cur:
+            await cur.execute(sql, tuple(file_ids))
+            rows = await cur.fetchall()
+        return {int(row["id"]): row for row in rows}
 
     async def get_file(self, file_id: int) -> dict[str, Any] | None:
         async with self._db.cursor() as cur:

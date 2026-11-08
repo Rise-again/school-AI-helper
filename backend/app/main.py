@@ -27,6 +27,8 @@ from app.rag.embedding import HttpEmbeddingClient
 from app.rag.indexer import Indexer
 from app.rag.ocr import HttpOcrClient
 from app.rag.parser import DocumentParser
+from app.rag.rerank import HttpRerankerClient, NoopReranker
+from app.rag.retriever import Retriever
 from app.rag.store import ChromaVectorStore, UnavailableVectorStore, VectorStore
 from app.repositories.conversations import ConversationRepository
 from app.repositories.kb import KbRepository
@@ -62,13 +64,14 @@ async def lifespan(app: FastAPI):
         logger.error("vector_store_unavailable", extra=log_fields(error=str(exc)[:300]))
         vector_store = UnavailableVectorStore(str(exc)[:300])
 
+    embedder = HttpEmbeddingClient(settings.embed_base_url, batch_size=settings.embed_batch_size)
     indexer = Indexer(
         parser=DocumentParser(
             HttpOcrClient(settings.ocr_base_url),
             pdf_mode=settings.parse_pdf_mode,
             min_chars=settings.ocr_min_chars,
         ),
-        embedder=HttpEmbeddingClient(settings.embed_base_url, batch_size=settings.embed_batch_size),
+        embedder=embedder,
         store=vector_store,
         repo=kb_repo,
         target_tokens=settings.chunk_target_tokens,
@@ -81,6 +84,21 @@ async def lifespan(app: FastAPI):
         indexer=indexer,
         store=vector_store,
         upload_dir=settings.upload_dir,
+    )
+
+    reranker = (
+        HttpRerankerClient(settings.rerank_base_url)
+        if settings.app_env != "test"
+        else NoopReranker()
+    )
+    app.state.retriever = Retriever(
+        embedder=embedder,
+        reranker=reranker,
+        store=vector_store,
+        kb_repo=kb_repo,
+        top_k=settings.rag_top_k,
+        top_n=settings.rag_top_n,
+        threshold=settings.rag_score_threshold,
     )
 
     logger.info("service_started", extra=log_fields(env=settings.app_env, db_connected=db.connected))

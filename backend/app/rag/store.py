@@ -30,6 +30,14 @@ class VectorStore(Protocol):
 
     def count(self) -> int: ...
 
+    def query(
+        self,
+        *,
+        embedding: Sequence[float],
+        top_k: int,
+        where: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]: ...
+
 
 def _sanitize_metadata(meta: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in meta.items() if isinstance(v, (str, int, float, bool))}
@@ -62,6 +70,37 @@ class ChromaVectorStore:
     def count(self) -> int:
         return int(self._collection.count())
 
+    def query(
+        self,
+        *,
+        embedding: Sequence[float],
+        top_k: int,
+        where: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        result = self._collection.query(
+            query_embeddings=[list(map(float, embedding))],
+            n_results=max(1, int(top_k)),
+            where=where or None,
+            include=["documents", "metadatas", "distances"],
+        )
+        hits: list[dict[str, Any]] = []
+        ids = (result.get("ids") or [[]])[0]
+        docs = (result.get("documents") or [[]])[0]
+        metas = (result.get("metadatas") or [[]])[0]
+        dists = (result.get("distances") or [[]])[0]
+        for idx, chunk_id in enumerate(ids):
+            distance = float(dists[idx]) if idx < len(dists) else 1.0
+            hits.append(
+                {
+                    "id": chunk_id,
+                    "document": docs[idx] if idx < len(docs) else "",
+                    "metadata": metas[idx] if idx < len(metas) else {},
+                    # collection 用 cosine 距离，转成相似度
+                    "score": 1.0 - distance,
+                }
+            )
+        return hits
+
 
 class InMemoryVectorStore:
     """测试替身：行为与 Chroma 一致（按 kb_file_id 可删、可计数）。"""
@@ -89,6 +128,25 @@ class InMemoryVectorStore:
     def count(self) -> int:
         return len(self.items)
 
+    def query(
+        self,
+        *,
+        embedding: Sequence[float],
+        top_k: int,
+        where: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        hits: list[dict[str, Any]] = []
+        for chunk_id, item in self.items.items():
+            meta = item["metadata"]
+            if where and any(meta.get(k) != v for k, v in where.items()):
+                continue
+            score = sum(a * b for a, b in zip(embedding, item["embedding"]))
+            hits.append(
+                {"id": chunk_id, "document": item["document"], "metadata": meta, "score": float(score)}
+            )
+        hits.sort(key=lambda h: h["score"], reverse=True)
+        return hits[: max(1, int(top_k))]
+
 
 class UnavailableVectorStore:
     """chromadb 未安装或初始化失败时的占位：用的时候明确报错，而不是静默返回空结果。"""
@@ -110,3 +168,7 @@ class UnavailableVectorStore:
     def count(self) -> int:
         self._raise()
         return 0
+
+    def query(self, **kwargs) -> list[dict[str, Any]]:  # noqa: ANN003
+        self._raise()
+        return []

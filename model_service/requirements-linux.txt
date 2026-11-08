@@ -16,6 +16,7 @@ torch==2.14.1
 paddlepaddle-gpu==3.3.1
 paddleocr==3.7.0
 pillow>=10.0.0
+pypdfium2>=4.30.0   # PDF 逐页栅格化（BSD/Apache 许可，无需系统依赖）
 
 # 推理引擎（单独 venv）
 vllm==0.31.0

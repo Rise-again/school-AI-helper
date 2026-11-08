@@ -49,6 +49,7 @@ class KbService:
         content: bytes,
         uploaded_by: int | None,
         source_dept: str | None = None,
+        source_url: str | None = None,
         effective_from: date | None = None,
         effective_to: date | None = None,
     ) -> dict[str, Any]:
@@ -76,6 +77,7 @@ class KbService:
             file_type=suffix.lstrip("."),
             size_bytes=len(content),
             source_dept=source_dept,
+            source_url=source_url,
             effective_from=effective_from.isoformat() if effective_from else None,
             effective_to=effective_to.isoformat() if effective_to else None,
             uploaded_by=uploaded_by,

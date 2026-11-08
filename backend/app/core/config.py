@@ -178,7 +178,7 @@ class Settings(BaseModel):
             )
             raise RuntimeError(
                 f"配置校验失败（来源：{path} + 环境变量）：\n{detail}\n"
-                f"请对照 {BACKEND_DIR / '.env.example'} 补全 backend/.env"
+                f"请对照 {PROJECT_ROOT / '.env.example'} 生成 backend/.env（可运行 python scripts/gen_env.py）"
             ) from exc
 
 

@@ -137,3 +137,23 @@
 - P2-06 评测集（需要 20 份真实文档）
 - P0-08 备份镜像（依赖装完了，可以在控制台创建）、自定义服务链接（需你在控制台点开）
 - 数据备份脚本、systemd 托管（属 P9，但建议早做）
+
+---
+
+## 2026-11-08（周六）· 打包与开源准备
+
+**做了什么**
+- `install.sh`：七步一键安装（环境检查 → 系统依赖 → 三个虚拟环境 → 依赖 → 模型 → 数据库 → 自检），幂等、可重复执行、支持 `--skip-models/--skip-apt/--skip-db` 和数据目录自定义。
+- `scripts/start.sh` / `stop.sh`：按 vLLM → model-service → 后端 的顺序启动，逐个等就绪，pid 落在 `run/`，`stop.sh` 按 pid 停止。
+- `scripts/fetch_models.sh`：从 ModelScope 拉 Qwen2.5-7B + 两个 bge，已存在则跳过。
+- `scripts/gen_env.py`：由 `.env.example` 生成 `backend/.env`，自动填 32 位 JWT 与数据库口令。
+- `scripts/install_windows.ps1`：Windows 开发机只装 Web 栈，模型调用云端。
+- 开源配套：MIT LICENSE、`.gitattributes`（强制 sh 用 LF）、GitHub Actions（后端 55 条 + 模型服务 8 条）。
+
+**验证**
+- 在服务器上实跑 `bash install.sh --skip-models --skip-db`：识别到三个环境已存在，全部跳过，自检 7 项全绿。
+- `bash scripts/start.sh`：vLLM 就绪 → model-service 就绪 → 后端就绪，三个 pid 文件齐全，`/readyz` 三项 ok。
+
+**两个坑**
+- `pkill -f "venvs/web/bin/uvicorn"` 会把执行这条命令的 SSH 会话一起杀掉（命令行里含同样字符串），要用 `venvs/[w]eb/...` 的括号写法避开自匹配。
+- 在 SSH 非交互会话里用 `nohup ... &` 起长任务，会话结束会被带走；必须 `setsid`。

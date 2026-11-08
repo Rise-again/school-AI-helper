@@ -21,6 +21,8 @@ from app.rag.ocr import NullOcrClient, OcrClient
 
 logger = logging.getLogger("campus.parser")
 
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"}
+
 SUPPORTED_SUFFIXES = {
     ".pdf",
     ".docx",
@@ -33,9 +35,12 @@ SUPPORTED_SUFFIXES = {
     ".txt",
     ".md",
     ".csv",
-}
+} | IMAGE_SUFFIXES
 
 _WS = re.compile(r"\s+")
+
+# 只有这些格式才值得送 OCR：纯文本类再短也不该走图像识别
+OCR_SUFFIXES = {".pdf"} | IMAGE_SUFFIXES
 
 
 @dataclass
@@ -114,7 +119,11 @@ class DocumentParser:
             raise ValidationFailed(f"不支持的文件类型：{suffix or '未知'}")
 
         warnings: list[str] = []
-        if suffix == ".pdf" and self._pdf_mode == "page":
+        if suffix in IMAGE_SUFFIXES:
+            # 图片没有文本层，直接交给 OCR，不经过 MarkItDown
+            pages = []
+            channel = "ocr"
+        elif suffix == ".pdf" and self._pdf_mode == "page":
             pages, warnings = await self._parse_pdf(path)
             channel = "pdf-text"
         else:
@@ -122,14 +131,17 @@ class DocumentParser:
             pages = [PageText(page_no=None, text=_clean(md))]
             channel = "markitdown"
 
-        # 整篇几乎没文字 → 整篇 OCR
-        if self._visible(pages) < self._min_chars:
+        # 整篇几乎没文字 → 仅对可 OCR 的格式走图像识别。
+        # 纯文本类（txt/md/docx…）再短也是真内容，不能送去 OCR，否则会被 OCR 服务拒收。
+        if self._visible(pages) < self._min_chars and suffix in OCR_SUFFIXES:
             ocr_text = await self._ocr.ocr_file(path)
             if ocr_text:
                 pages = self._merge_ocr(pages, ocr_text)
                 channel = "ocr"
             else:
                 warnings.append("未提取到文本，且 OCR 未返回内容（可能是纯图片或加密文档）")
+        elif self._visible(pages) == 0:
+            warnings.append("文档没有可见文本")
 
         doc = ParsedDocument(
             pages=[p for p in pages if p.text.strip()],

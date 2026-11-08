@@ -45,10 +45,10 @@ def _load_env(path: Path) -> dict[str, str]:
 def check_python() -> None:
     major, minor = sys.version_info[:2]
     ver = f"{major}.{minor}.{sys.version_info[2]}"
-    if (major, minor) == (3, 10):
+    if (major, minor) in ((3, 10), (3, 11)):
         add(OK, "Python", ver)
     elif (major, minor) >= (3, 10):
-        add(WARN, "Python", f"{ver}（要求 3.10.x，版本不一致可能装不上轮子）")
+        add(WARN, "Python", f"{ver}（本项目在 3.11 上验证，更高版本可能缺轮子）")
     else:
         add(FAIL, "Python", f"{ver}（要求 3.10+）")
 
@@ -64,7 +64,8 @@ def check_node() -> None:
     except ValueError:
         add(WARN, "Node", f"版本解析失败：{out}")
         return
-    add(OK if major >= 18 else FAIL, "Node", f"{out}（要求 >=18）")
+    # Node 只用于前端构建（P6），后端运行不需要，所以不达标只提示不判失败
+    add(OK if major >= 18 else WARN, "Node", f"{out}（前端构建需 >=18；后端运行不依赖）")
 
 
 def check_env_file() -> dict[str, str]:
@@ -156,7 +157,7 @@ def check_ports(env: dict[str, str] | None = None) -> None:
                 sock.bind(("127.0.0.1", port))
                 add(OK, f"端口 {port}", f"空闲（{label}）")
             except OSError:
-                add(WARN, f"端口 {port}", "被占用，启动前先释放")
+                add(WARN, f"端口 {port}", "已被占用（可能服务正在运行）")
 
 
 def check_dirs() -> None:

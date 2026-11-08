@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+from pathlib import Path
+
 import pytest
 
 from app.core.errors import ValidationFailed
@@ -33,24 +36,32 @@ def test_text_file_is_parsed(tmp_path):
     assert parsed.visible_chars > 20
 
 
-def test_empty_file_falls_back_to_ocr(tmp_path):
-    path = tmp_path / "scan.txt"
-    path.write_text("", encoding="utf-8")
+PNG_1PX = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+def _tiny_png(tmp_path) -> "Path":
+    path = tmp_path / "scan.png"
+    path.write_bytes(PNG_1PX)
+    return path
+
+
+def test_image_without_text_falls_back_to_ocr(tmp_path):
+    """只有 PDF/图片才走 OCR：1px 图片没有文本层，应当调用 OCR。"""
     ocr = FakeOcr("OCR 识别出的正文内容，关于奖助学金评定办法。")
     import asyncio
 
-    parsed = asyncio.run(DocumentParser(ocr).parse(path))
+    parsed = asyncio.run(DocumentParser(ocr).parse(_tiny_png(tmp_path)))
     assert parsed.channel == "ocr"
     assert "奖助学金" in parsed.text
-    assert ocr.calls, "空文本必须调用 OCR"
+    assert ocr.calls, "图像类文件必须有文本层缺失时调用 OCR"
 
 
-def test_empty_file_without_ocr_reports_warning(tmp_path):
-    path = tmp_path / "scan.txt"
-    path.write_text("", encoding="utf-8")
+def test_image_without_ocr_reports_warning(tmp_path):
     import asyncio
 
-    parsed = asyncio.run(DocumentParser().parse(path))
+    parsed = asyncio.run(DocumentParser().parse(_tiny_png(tmp_path)))
     assert parsed.pages == []
     assert any("OCR" in w for w in parsed.warnings)
 
@@ -64,11 +75,14 @@ def test_unsupported_suffix_rejected(tmp_path):
         asyncio.run(DocumentParser().parse(path))
 
 
-def test_short_text_triggers_ocr(tmp_path):
-    path = tmp_path / "stub.txt"
-    path.write_text("目录", encoding="utf-8")  # 可见字符 < 50
-    ocr = FakeOcr("完整正文：本规定适用于全校本科生。")
+def test_short_text_document_is_not_sent_to_ocr(tmp_path):
+    """短 txt 是真内容，不能被当成扫描件送去 OCR（OCR 只认 PDF/图片）。"""
+    path = tmp_path / "short.txt"
+    path.write_text("补考定于 3 月 15 日。", encoding="utf-8")
+    ocr = FakeOcr("不该被调用")
     import asyncio
 
     parsed = asyncio.run(DocumentParser(ocr, min_chars=50).parse(path))
-    assert parsed.channel == "ocr"
+    assert parsed.channel == "markitdown"
+    assert "补考" in parsed.text
+    assert ocr.calls == []

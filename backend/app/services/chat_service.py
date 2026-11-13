@@ -85,7 +85,11 @@ class ChatService:
             conversation_id=conversation_id, role="user", content=content, trace_id=trace_id_var.get()
         )
         async for event in self._generate(
-            query=content, role=role, history=history, conversation_id=conversation_id
+            query=content,
+            role=role,
+            history=history,
+            conversation_id=conversation_id,
+            identity=f"user:{user_id}",
         ):
             yield event
 
@@ -94,7 +98,9 @@ class ChatService:
         self, *, query: str, client_key: str
     ) -> AsyncIterator[tuple[str, dict]]:
         # 配额已在 ensure_guest_allowed 扣减，这里不再重复计数
-        async for event in self._generate(query=query, role="guest", history=[], conversation_id=None):
+        async for event in self._generate(
+            query=query, role="guest", history=[], conversation_id=None, identity=f"guest:{client_key}"
+        ):
             yield event
 
     def ensure_guest_allowed(self, client_key: str) -> None:
@@ -149,9 +155,16 @@ class ChatService:
         role: str,
         history: list[dict[str, str]],
         conversation_id: int | None,
+        identity: str,
     ) -> AsyncIterator[tuple[str, dict]]:
         started = time.perf_counter()
-        state: dict[str, Any] = {"query": query, "role": role, "history": history, "trace": []}
+        state: dict[str, Any] = {
+            "query": query,
+            "role": role,
+            "identity": identity,
+            "history": history,
+            "trace": [],
+        }
         state = await self._graph.ainvoke(state)
 
         logger.info(

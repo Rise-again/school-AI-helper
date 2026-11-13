@@ -21,6 +21,7 @@ class AgentState(TypedDict, total=False):
 
     query: str
     role: str
+    identity: str  # user:<id> 或 guest:<ip>，用于按用户计配额
     history: list[dict[str, str]]
     intent: str
     keywords: str  # 路由同时产出的检索关键词
@@ -114,7 +115,7 @@ CHITCHAT_PROMPT = """你是海南热带海洋学院的校园智能助手。用�
 用户：{query}"""
 
 
-def format_context(history: list[dict[str, str]], turns: int = 3) -> str:
+def format_context(history: list[dict[str, str]], turns: int = 5) -> str:
     """把最近几轮对话压成上下文块；空历史返回空串，避免污染提示词。"""
     if not history:
         return ""

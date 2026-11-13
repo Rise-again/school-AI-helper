@@ -43,12 +43,14 @@ class AgentDeps:
         search: AnySearchClient,
         cache: SearchCacheRepository,
         search_daily_quota: int = 1800,
+        search_user_daily_quota: int = 60,
     ) -> None:
         self.llm = llm
         self.retriever = retriever
         self.search = search
         self.cache = cache
         self.search_daily_quota = search_daily_quota
+        self.search_user_daily_quota = search_user_daily_quota
 
 
 async def route_query(
@@ -155,15 +157,27 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
             if cached is not None:
                 items = cached
             else:
-                # 每日总配额：防止把平台给的 2000 次/天用穿
-                allowed = await deps.cache.consume_daily(
-                    "anysearch:global", deps.search_daily_quota
+                identity = state.get("identity") or "guest:unknown"
+                # 先扣个人额度，再扣全局额度：避免个人超额时白白消耗全局池
+                user_ok = await deps.cache.consume_daily(
+                    f"anysearch:{identity}", deps.search_user_daily_quota
                 )
-                if not allowed:
-                    degraded = "search_quota_exceeded"
+                global_ok = False
+                if user_ok:
+                    global_ok = await deps.cache.consume_daily(
+                        "anysearch:global", deps.search_daily_quota
+                    )
+                if not user_ok or not global_ok:
+                    degraded = "search_quota_exceeded" if not user_ok else "search_global_quota_exceeded"
                     logger.warning(
                         "search_quota_exceeded",
-                        extra={"extra_fields": {"limit": deps.search_daily_quota}},
+                        extra={
+                            "extra_fields": {
+                                "identity": identity,
+                                "user_limit": deps.search_user_daily_quota,
+                                "global_limit": deps.search_daily_quota,
+                            }
+                        },
                     )
                 else:
                     try:

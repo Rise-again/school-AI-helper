@@ -111,6 +111,7 @@ class Settings(BaseModel):
     anysearch_zone: Literal["cn", "intl"] = "cn"
     anysearch_daily_quota: int = Field(default=1800, ge=1)
     search_domain_suffix: str = "hntou.edu.cn"  # 动态搜索只保留校内来源
+    search_user_daily_quota: int = Field(default=60, ge=1)  # 每用户每天最多触发多少次联网搜索
     edu_host: str = "zfjw.hntou.edu.cn"
     edu_port: int = Field(default=80, ge=1, le=65535)
     edu_ssl: bool = False

@@ -69,14 +69,17 @@ class FakeSearch:
 
 
 class FakeCache:
-    def __init__(self, hit=None, quota_ok=True):
+    def __init__(self, hit=None, quota_ok=True, fail_keys=None):
         self.hit = hit
         self.saved = None
         self.quota_ok = quota_ok
-        self.consumed = 0
+        self.fail_keys = fail_keys or set()
+        self.consumed = []
 
     async def consume_daily(self, key, limit):
-        self.consumed += 1
+        self.consumed.append(key)
+        if any(k in key for k in self.fail_keys):
+            return False
         return self.quota_ok
 
     async def get(self, key, source="anysearch"):
@@ -86,9 +89,11 @@ class FakeCache:
         self.saved = payload
 
 
-def run(deps, query):
+def run(deps, query, identity="user:1"):
     graph = build_graph(deps)
-    return asyncio.run(graph.ainvoke({"query": query, "role": "student", "history": [], "trace": []}))
+    return asyncio.run(
+        graph.ainvoke({"query": query, "role": "student", "identity": identity, "history": [], "trace": []})
+    )
 
 
 def make_deps(**kw):
@@ -145,6 +150,21 @@ def test_web_degrades_when_daily_quota_exhausted():
     out = run(make_deps(llm=FakeLLM("web"), search=FakeSearch([]), cache=cache), "最新通知")
     assert out["degraded"] == "search_quota_exceeded"
     assert out["evidence"], "配额耗尽应回落静态库"
+
+
+def test_per_user_quota_blocks_before_global():
+    cache = FakeCache(fail_keys={"user:42"})
+    out = run(make_deps(llm=FakeLLM("web"), search=FakeSearch([]), cache=cache), "最新通知", identity="user:42")
+    assert out["degraded"] == "search_quota_exceeded"
+    assert cache.consumed == ["anysearch:user:42"], "个人超限时不应再扣全局额度"
+    assert out["evidence"], "应回落静态库"
+
+
+def test_global_quota_blocks_when_pool_exhausted():
+    cache = FakeCache(fail_keys={"global"})
+    out = run(make_deps(llm=FakeLLM("web"), search=FakeSearch([]), cache=cache), "最新通知")
+    assert out["degraded"] == "search_global_quota_exceeded"
+    assert cache.consumed == ["anysearch:user:1", "anysearch:global"]
 
 
 def test_web_uses_cache_when_present():

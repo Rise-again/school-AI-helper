@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
     embedder = HttpEmbeddingClient(settings.embed_base_url, batch_size=settings.embed_batch_size)
     indexer = Indexer(
         parser=DocumentParser(
-            HttpOcrClient(settings.ocr_base_url),
+            HttpOcrClient(settings.ocr_base_url, timeout=settings.ocr_timeout_s),
             pdf_mode=settings.parse_pdf_mode,
             min_chars=settings.ocr_min_chars,
         ),

@@ -90,6 +90,7 @@ class Settings(BaseModel):
     # 解析
     parse_pdf_mode: Literal["page", "markitdown"] = "page"
     ocr_min_chars: int = Field(default=50, ge=1)
+    ocr_timeout_s: float = Field(default=900.0, gt=0)  # CPU OCR 每页约 30s，整份可能数分钟
 
     # 切片（bge 与 reranker 都是 512 token 上限，见计划 3.2 第 2 条）
     chunk_target_tokens: int = Field(default=400, ge=50)

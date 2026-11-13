@@ -35,6 +35,12 @@ from app.repositories.conversations import ConversationRepository
 from app.repositories.kb import KbRepository
 from app.repositories.users import UserRepository
 from app.services.auth_service import AuthService
+from app.agents.graph import build_graph
+from app.agents.nodes import AgentDeps
+from app.integrations.anysearch import AnySearchClient
+from app.integrations.llm_client import LLMClient
+from app.repositories.search_cache import SearchCacheRepository
+from app.services.chat_service import ChatService
 from app.services.conversation_service import ConversationService
 from app.services.kb_service import KbService
 
@@ -92,6 +98,7 @@ async def lifespan(app: FastAPI):
         if settings.app_env != "test"
         else NoopReranker()
     )
+    conversations_repo = ConversationRepository(db)
     app.state.retriever = Retriever(
         embedder=embedder,
         reranker=reranker,
@@ -100,6 +107,33 @@ async def lifespan(app: FastAPI):
         top_k=settings.rag_top_k,
         top_n=settings.rag_top_n,
         threshold=settings.rag_score_threshold,
+    )
+
+    llm = LLMClient(
+        settings.llm_base_url,
+        settings.llm_model,
+        api_key=settings.llm_api_key,
+        timeout=settings.llm_timeout_s,
+    )
+    search_client = AnySearchClient(
+        settings.anysearch_base_url,
+        settings.anysearch_api_key,
+        zone=settings.anysearch_zone,
+        domain_suffix=settings.search_domain_suffix,
+    )
+    agent_graph = build_graph(
+        AgentDeps(
+            llm=llm,
+            retriever=app.state.retriever,
+            search=search_client,
+            cache=SearchCacheRepository(db),
+        )
+    )
+    app.state.chat_service = ChatService(
+        graph=agent_graph,
+        llm=llm,
+        conversations=ConversationRepository(db),
+        settings=settings,
     )
 
     logger.info("service_started", extra=log_fields(env=settings.app_env, db_connected=db.connected))

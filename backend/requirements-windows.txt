@@ -13,6 +13,7 @@ bcrypt==5.0.0
 python-multipart==0.0.32
 httpx==0.28.1
 chromadb==1.5.9
+langgraph==1.2.20
 
 # 文档解析（MarkItDown 的底层依赖，显式钉住避免漂移）
 markitdown[xlsx,xls]==0.1.9   # Excel 转换需要 pandas/openpyxl/xlrd

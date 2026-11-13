@@ -10,8 +10,9 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.deps import envelope, get_retriever, require_roles
+from app.api.deps import envelope, get_chat_service, get_retriever, require_roles
 from app.rag.retriever import Retriever
+from app.services.chat_service import ChatService
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 _admin = require_roles("admin")
@@ -28,3 +29,13 @@ async def search(
     chunks = await retriever.search(q, top_n=top_n, include_expired=include_expired)
     items = [asdict(chunk) for chunk in chunks]
     return envelope(0, "ok", {"query": q, "count": len(items), "items": items})
+
+
+@router.get("/intent", summary="查看意图分类结果（调路由用）")
+async def intent(
+    q: str = Query(min_length=1, max_length=200),
+    _admin=Depends(_admin),
+    svc: ChatService = Depends(get_chat_service),
+) -> dict:
+    label = await svc.classify(q)
+    return envelope(0, "ok", {"query": q, "intent": label})

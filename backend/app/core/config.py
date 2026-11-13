@@ -110,6 +110,7 @@ class Settings(BaseModel):
     anysearch_api_key: str = ""
     anysearch_zone: Literal["cn", "intl"] = "cn"
     anysearch_daily_quota: int = Field(default=900, ge=1)
+    search_domain_suffix: str = "hntou.edu.cn"  # 动态搜索只保留校内来源
     edu_host: str = "zfjw.hntou.edu.cn"
     edu_port: int = Field(default=80, ge=1, le=65535)
     edu_ssl: bool = False

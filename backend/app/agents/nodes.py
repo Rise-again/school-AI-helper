@@ -17,7 +17,7 @@ import logging
 from dataclasses import asdict
 from typing import Any, Awaitable, Callable
 
-from app.agents.state import INTENTS, ROUTER_PROMPT, AgentState, format_context
+from app.agents.state import INTENTS, ROUTER_PROMPT, AgentState, format_context, format_terms
 from app.core.errors import DependencyUnavailable, ModelUnavailable
 from app.integrations.anysearch import AnySearchClient
 from app.integrations.llm_client import LLMClient
@@ -58,6 +58,7 @@ class AgentDeps:
         cache: SearchCacheRepository,
         search_daily_quota: int = 1800,
         search_user_daily_quota: int = 60,
+        kb_titles_provider: Callable[[], Awaitable[list[str]]] | None = None,
     ) -> None:
         self.llm = llm
         self.retriever = retriever
@@ -66,20 +67,29 @@ class AgentDeps:
         self.cache = cache
         self.search_daily_quota = search_daily_quota
         self.search_user_daily_quota = search_user_daily_quota
+        self.kb_titles_provider = kb_titles_provider
 
 
 async def route_query(
-    llm: LLMClient, query: str, history: list[dict[str, str]] | None = None
+    llm: LLMClient,
+    query: str,
+    history: list[dict[str, str]] | None = None,
+    terms: list[str] | None = None,
 ) -> tuple[str, str]:
-    """一次调用同时得到意图与检索关键词（分类+改写合并，省一次模型往返）。"""
+    """一次调用同时得到意图与检索关键词（分类+改写合并，省一次模型往返）。
+
+    terms 是知识库文件名，作为"官方用词参考"注入提示词——
+    不写死同义词表，让模型结合真实语料现场判断该换成什么说法。
+    """
     import json as _json
 
     intent = keyword_intent(query)
     keywords = query
     ctx = format_context(history or [])
+    terms_block = format_terms(terms or [])
     try:
         raw = await llm.chat(
-            [{"role": "user", "content": ROUTER_PROMPT.format(query=query, context=ctx)}],
+            [{"role": "user", "content": ROUTER_PROMPT.format(query=query, context=ctx, terms=terms_block)}],
             temperature=0.0,
             max_tokens=64,
         )
@@ -100,8 +110,13 @@ async def route_query(
     return intent, keywords
 
 
-async def classify_intent(llm: LLMClient, query: str, history: list[dict[str, str]] | None = None) -> str:
-    return (await route_query(llm, query, history))[0]
+async def classify_intent(
+    llm: LLMClient,
+    query: str,
+    history: list[dict[str, str]] | None = None,
+    terms: list[str] | None = None,
+) -> str:
+    return (await route_query(llm, query, history, terms))[0]
 
 
 def _trace(state: AgentState, node: str, **fields: Any) -> list[dict]:
@@ -112,7 +127,15 @@ def _trace(state: AgentState, node: str, **fields: Any) -> list[dict]:
 
 def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[dict]]]:
     async def classify(state: AgentState) -> dict:
-        intent, keywords = await route_query(deps.llm, state["query"], state.get("history"))
+        terms: list[str] = []
+        if deps.kb_titles_provider is not None:
+            try:
+                terms = await deps.kb_titles_provider()
+            except Exception:  # noqa: BLE001 - 取术语失败不影响主流程
+                logger.warning("kb_titles_unavailable")
+        intent, keywords = await route_query(
+            deps.llm, state["query"], state.get("history"), terms
+        )
         return {
             "intent": intent,
             "keywords": keywords,
@@ -204,6 +227,18 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
         if want_web:
             web_items, degraded = await _web_search(state, keywords)
 
+        # 知识库结果已经用「改写后的关键词」重排过，不能再拿原句重排一遍：
+        # 口语长句（"一般都做些什么工作"）对同一片段只能打 0.1–0.2 分，会把正确结果全部筛掉。
+        # 这里只对联网结果补打分，KB 沿用检索阶段（关键词）的分数。
+        if web_items:
+            try:
+                web_scores = await deps.reranker.rerank(keywords, [e["content"] for e in web_items])
+                web_items = [
+                    dict(e, score=round(float(s), 4)) for e, s in zip(web_items, web_scores)
+                ]
+            except DependencyUnavailable as exc:
+                logger.warning("rerank_failed", extra={"extra_fields": {"error": str(exc)}})
+
         merged = kb_items + web_items
         if not merged:
             return {
@@ -213,18 +248,7 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
                 "trace": _trace(state, "retrieve", kb=0, web=0, kb_top=round(kb_top, 3)),
             }
 
-        # 统一重排：知识库与联网结果放同一把尺子上比
-        try:
-            scores = await deps.reranker.rerank(query, [e["content"] for e in merged])
-        except DependencyUnavailable as exc:
-            logger.warning("rerank_failed", extra={"extra_fields": {"error": str(exc)}})
-            scores = [e["score"] for e in merged]
-
-        ranked = sorted(
-            (dict(e, score=round(float(s), 4)) for e, s in zip(merged, scores)),
-            key=lambda e: e["score"],
-            reverse=True,
-        )
+        ranked = sorted(merged, key=lambda e: e["score"], reverse=True)
         kept = [e for e in ranked if e["score"] >= EVIDENCE_MIN_SCORE][:3]  # 证据越多越容易漏标
 
         citations = [

@@ -65,6 +65,17 @@ class KbRepository:
             rows = await cur.fetchall()
         return {int(row["id"]): row for row in rows}
 
+    async def list_titles(self, limit: int = 30) -> list[str]:
+        """取已入库文件名，供查询改写时对齐官方用词。"""
+        sql = (
+            "SELECT filename FROM kb_file WHERE deleted_at IS NULL "
+            "AND parse_status='success' ORDER BY id DESC LIMIT %s"
+        )
+        async with self._db.cursor() as cur:
+            await cur.execute(sql, (limit,))
+            rows = await cur.fetchall()
+        return [str(r["filename"]) for r in rows]
+
     async def get_file(self, file_id: int) -> dict[str, Any] | None:
         async with self._db.cursor() as cur:
             await cur.execute("SELECT * FROM kb_file WHERE id = %s", (file_id,))

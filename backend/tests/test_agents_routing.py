@@ -249,5 +249,20 @@ def test_rerank_failure_keeps_recall_scores():
     assert out["evidence"][0]["score"] == pytest.approx(0.9)
 
 
+def test_format_terms_strips_extension_and_dedupes():
+    from app.agents.state import format_terms
+
+    block = format_terms(["学生勤工助学管理办法.pdf", "学生勤工助学管理办法.pdf", "国家助学金.docx"])
+    assert "学生勤工助学管理办法" in block
+    assert ".pdf" not in block
+    assert block.count("学生勤工助学管理办法") == 1
+
+
+def test_format_terms_empty():
+    from app.agents.state import format_terms
+
+    assert format_terms([]) == ""
+
+
 def test_threshold_constant_is_sane():
     assert 0 < KB_SUFFICIENT_SCORE < 1

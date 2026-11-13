@@ -11,6 +11,8 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
+from typing import Any
+
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -122,6 +124,17 @@ async def lifespan(app: FastAPI):
         zone=settings.anysearch_zone,
         domain_suffix=settings.search_domain_suffix,
     )
+    kb_repo_for_terms = KbRepository(db)
+    _terms_cache: dict[str, Any] = {"at": 0.0, "titles": []}
+
+    async def kb_titles() -> list[str]:
+        """知识库文件名做 TTL 缓存，避免每次问答都查库。"""
+        now = time.monotonic()
+        if now - _terms_cache["at"] > 60:
+            _terms_cache["titles"] = await kb_repo_for_terms.list_titles(30)
+            _terms_cache["at"] = now
+        return _terms_cache["titles"]  # type: ignore[return-value]
+
     agent_graph = build_graph(
         AgentDeps(
             llm=llm,
@@ -131,6 +144,7 @@ async def lifespan(app: FastAPI):
             cache=SearchCacheRepository(db),
             search_daily_quota=settings.anysearch_daily_quota,
             search_user_daily_quota=settings.search_user_daily_quota,
+            kb_titles_provider=kb_titles,
         )
     )
     app.state.chat_service = ChatService(

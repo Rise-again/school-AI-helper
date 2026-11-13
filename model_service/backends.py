@@ -74,7 +74,13 @@ class LocalBackend:
                 from paddleocr import PaddleOCR
 
                 logger.info("loading_ocr", extra={"lang": self.ocr_lang})
-                self._ocr_model = PaddleOCR(use_doc_orientation_classify=False, lang=self.ocr_lang)
+                # enable_mkldnn=False：Paddle 3.3 的 MKLDNN 在 CPU 上会对 PIR 属性抛
+                # NotImplementedError，关掉才能正常推理
+                self._ocr_model = PaddleOCR(
+                    use_doc_orientation_classify=False,
+                    lang=self.ocr_lang,
+                    enable_mkldnn=False,
+                )
             return self._ocr_model
 
     # ---------- 推理 ----------
@@ -98,7 +104,9 @@ class LocalBackend:
         images = _rasterize(path, pages)
         result: dict[int, str] = {}
         for page_no, image in images:
-            raw = model.predict(image)
+            # PaddleOCR 3.x 的 predict() 只接受 numpy.ndarray 或路径，
+            # 传 PIL.Image 会被静默忽略并返回空文本。这里转成 BGR ndarray。
+            raw = model.predict(_to_bgr_array(image))
             result[page_no] = _join_ocr_lines(raw)
         return result
 
@@ -115,6 +123,13 @@ def _l2_normalize(vec: list[float]) -> list[float]:
 
     norm = math.sqrt(sum(x * x for x in vec)) or 1.0
     return [x / norm for x in vec]
+
+
+def _to_bgr_array(image):
+    import numpy as np
+
+    rgb = np.array(image.convert("RGB"))
+    return rgb[:, :, ::-1]  # PaddleOCR 按 BGR 处理（OpenCV 约定）
 
 
 def _rasterize(path: Path, pages: list[int] | None) -> list[tuple[int, object]]:
@@ -163,6 +178,11 @@ def _join_ocr_lines(raw: object) -> str:
                 return
             for item in node:
                 walk(item)
+            return
+        # PaddleOCR 3.x 返回 OCRResult，真正的结果在 .json["res"] 里
+        payload = getattr(node, "json", None)
+        if isinstance(payload, dict):
+            walk(payload)
             return
         texts = getattr(node, "rec_texts", None)
         if texts:

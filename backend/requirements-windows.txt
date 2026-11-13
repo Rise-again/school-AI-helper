@@ -15,7 +15,7 @@ httpx==0.28.1
 chromadb==1.5.9
 
 # 文档解析（MarkItDown 的底层依赖，显式钉住避免漂移）
-markitdown==0.1.9
+markitdown[xlsx,xls]==0.1.9   # Excel 转换需要 pandas/openpyxl/xlrd
 openpyxl==3.1.5
 python-pptx==1.0.2
 pypdf==7.0.0

@@ -42,11 +42,13 @@ class AgentDeps:
         retriever: Retriever,
         search: AnySearchClient,
         cache: SearchCacheRepository,
+        search_daily_quota: int = 1800,
     ) -> None:
         self.llm = llm
         self.retriever = retriever
         self.search = search
         self.cache = cache
+        self.search_daily_quota = search_daily_quota
 
 
 async def route_query(
@@ -153,13 +155,24 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
             if cached is not None:
                 items = cached
             else:
-                try:
-                    items = await deps.search.search(query)
-                    if items:
-                        await deps.cache.put(key, items)
-                except DependencyUnavailable as exc:
-                    degraded = "search_unavailable"
-                    logger.warning("search_failed", extra={"extra_fields": {"error": str(exc)}})
+                # 每日总配额：防止把平台给的 2000 次/天用穿
+                allowed = await deps.cache.consume_daily(
+                    "anysearch:global", deps.search_daily_quota
+                )
+                if not allowed:
+                    degraded = "search_quota_exceeded"
+                    logger.warning(
+                        "search_quota_exceeded",
+                        extra={"extra_fields": {"limit": deps.search_daily_quota}},
+                    )
+                else:
+                    try:
+                        items = await deps.search.search(query)
+                        if items:
+                            await deps.cache.put(key, items)
+                    except DependencyUnavailable as exc:
+                        degraded = "search_unavailable"
+                        logger.warning("search_failed", extra={"extra_fields": {"error": str(exc)}})
 
         if items:
             evidence = [

@@ -69,9 +69,15 @@ class FakeSearch:
 
 
 class FakeCache:
-    def __init__(self, hit=None):
+    def __init__(self, hit=None, quota_ok=True):
         self.hit = hit
         self.saved = None
+        self.quota_ok = quota_ok
+        self.consumed = 0
+
+    async def consume_daily(self, key, limit):
+        self.consumed += 1
+        return self.quota_ok
 
     async def get(self, key, source="anysearch"):
         return self.hit
@@ -132,6 +138,13 @@ def test_web_search_failure_falls_back_to_kb():
     out = run(make_deps(llm=FakeLLM("web"), search=FakeSearch(fail=True)), "最新通知")
     assert out["degraded"] == "search_unavailable"
     assert out["evidence"]
+
+
+def test_web_degrades_when_daily_quota_exhausted():
+    cache = FakeCache(quota_ok=False)
+    out = run(make_deps(llm=FakeLLM("web"), search=FakeSearch([]), cache=cache), "最新通知")
+    assert out["degraded"] == "search_quota_exceeded"
+    assert out["evidence"], "配额耗尽应回落静态库"
 
 
 def test_web_uses_cache_when_present():

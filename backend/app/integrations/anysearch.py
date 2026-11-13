@@ -49,9 +49,21 @@ class AnySearchClient:
     def enabled(self) -> bool:
         return bool(self._key)
 
+    def build_query(self, query: str) -> str:
+        """把域名拼进查询式。
+
+        AnySearch 不认 site 参数，但把域名写进 query 能显著提高命中率：
+        实测"放假通知"0 条校内结果，"放假通知 hntou.edu.cn"3 条。
+        """
+        q = " ".join(query.split())
+        if self._suffix and self._suffix not in q:
+            q = f"{q} {self._suffix}"
+        return q
+
     async def search(self, query: str) -> list[dict[str, Any]]:
         if not self.enabled:
             return []
+        query = self.build_query(query)
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.post(
@@ -66,7 +78,14 @@ class AnySearchClient:
         except ValueError as exc:
             raise DependencyUnavailable("搜索服务返回格式不正确") from exc
 
-        raw = payload.get("results") or payload.get("data") or []
+        # 实际返回：{"code":0,"data":{"results":[...]}}
+        data = payload.get("data")
+        if isinstance(data, dict):
+            raw = data.get("results") or data.get("items") or []
+        else:
+            raw = payload.get("results") or data or []
+        if raw and isinstance(raw[0], str):
+            raw = []  # 结构不符时宁可返回空，交给上层降级
         items: list[dict[str, Any]] = []
         for item in raw:
             url = str(item.get("url") or "")

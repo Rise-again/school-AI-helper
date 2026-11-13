@@ -109,7 +109,7 @@ class Settings(BaseModel):
     anysearch_base_url: str = "https://api.anysearch.com"
     anysearch_api_key: str = ""
     anysearch_zone: Literal["cn", "intl"] = "cn"
-    anysearch_daily_quota: int = Field(default=900, ge=1)
+    anysearch_daily_quota: int = Field(default=1800, ge=1)
     search_domain_suffix: str = "hntou.edu.cn"  # 动态搜索只保留校内来源
     edu_host: str = "zfjw.hntou.edu.cn"
     edu_port: int = Field(default=80, ge=1, le=65535)
@@ -118,7 +118,7 @@ class Settings(BaseModel):
     edu_retry: int = Field(default=2, ge=0, le=5)
 
     # 限流与队列（单 worker 内存实现）
-    rate_limit_per_minute: int = Field(default=20, ge=1)
+    rate_limit_per_minute: int = Field(default=10, ge=1)
     queue_max_size: int = Field(default=50, ge=1)
     queue_max_wait_s: float = Field(default=30.0, ge=0)
 

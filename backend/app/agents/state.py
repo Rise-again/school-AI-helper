@@ -11,7 +11,7 @@ from typing import Any, TypedDict
 PROMPT_VERSION = "p3-v1"
 
 # 生成时的上下文预算：vLLM 侧 max-model-len 是 4096，留出回答空间
-CONTEXT_TOKEN_BUDGET = 2800
+CONTEXT_TOKEN_BUDGET = 3400
 
 INTENTS = ("kb", "web", "edu", "chitchat", "unknown")
 

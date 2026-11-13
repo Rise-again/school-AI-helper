@@ -127,6 +127,7 @@ async def lifespan(app: FastAPI):
             retriever=app.state.retriever,
             search=search_client,
             cache=SearchCacheRepository(db),
+            search_daily_quota=settings.anysearch_daily_quota,
         )
     )
     app.state.chat_service = ChatService(

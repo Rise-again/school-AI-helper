@@ -36,11 +36,14 @@
 
 | event | data | 说明 |
 |---|---|---|
-| `meta` | `{message_id, trace_id}` | 开始，用于前端占位 |
+| `meta` | `{intent, evidence_count, degraded, prompt_version}` | 开始，告知意图、证据条数与降级原因 |
 | `delta` | `{text}` | 增量文本，可多次 |
-| `citation` | `{file, page, snippet, url, score}` | 引用块，可多次 |
-| `done` | `{tokens, latency_ms}` | 结束，消息已落库 |
-| `error` | `{code, message}` | 出错，前端展示重试 |
+| `replace` | `{text}` | 落地校验后**整段替换**已输出内容；前端收到后直接覆盖，不追加 |
+| `citation` | `{items: [{kb_file_id, chunk_id, page_no, url, snippet, score}]}` | 引用块，结束前一次性下发，只含回答里真正引用到的条目 |
+| `done` | `{latency_ms, chars}` | 结束，消息已落库 |
+| `error` | `{message}` | 出错，前端展示重试 |
+
+流式期间每 2.5 秒发一行 `: ping` 注释（平台代理空闲 4 秒即断流）。`replace` 可能不出现在某条回答里：只有在回答含资料中没有的具体内容、被落地校验改写时才会发出。
 
 客户端断开时必须保证消息完整落库（服务端在 `finally` 中补写）。
 

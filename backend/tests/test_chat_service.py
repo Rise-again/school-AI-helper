@@ -73,3 +73,29 @@ def test_guest_rate_limit_blocks_after_quota():
 def test_model_down_reply_is_user_facing():
     assert "暂时不可用" in MODEL_DOWN_REPLY
     assert "Traceback" not in MODEL_DOWN_REPLY
+
+
+def test_only_cited_sources_are_returned():
+    """模型引用了 [2]，就只展示第 2 条，其余候选不展示。"""
+    svc = make_service()
+    cands = [{"snippet": "A"}, {"snippet": "B"}, {"snippet": "C"}]
+    assert svc._used_citations("结论在这里 [2]。", cands) == [cands[1]]
+
+
+def test_multiple_citations_are_sorted_by_index():
+    svc = make_service()
+    cands = [{"snippet": "A"}, {"snippet": "B"}, {"snippet": "C"}]
+    assert svc._used_citations("[3] 与 [1] 都提到", cands) == [cands[0], cands[2]]
+
+
+def test_no_citation_means_empty_list():
+    """模型说"没找到"时不展示任何来源。"""
+    svc = make_service()
+    cands = [{"snippet": "A"}]
+    assert svc._used_citations("我没有找到相关依据。", cands) == []
+
+
+def test_out_of_range_citation_is_dropped():
+    svc = make_service()
+    cands = [{"snippet": "A"}]
+    assert svc._used_citations("引用不存在的 [9]", cands) == []

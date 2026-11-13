@@ -126,6 +126,7 @@ async def lifespan(app: FastAPI):
         AgentDeps(
             llm=llm,
             retriever=app.state.retriever,
+            reranker=reranker,
             search=search_client,
             cache=SearchCacheRepository(db),
             search_daily_quota=settings.anysearch_daily_quota,

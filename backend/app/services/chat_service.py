@@ -256,7 +256,12 @@ class ChatService:
                 latency_ms = int((time.perf_counter() - started) * 1000)
                 with contextlib.suppress(Exception):
                     await asyncio.shield(
-                        self._persist(conversation_id, partial, state.get("citations") or [], latency_ms)
+                        self._persist(
+                            conversation_id,
+                            partial,
+                            self._used_citations(partial, state.get("citations") or []),
+                            latency_ms,
+                        )
                     )
                 logger.info(
                     "stream_aborted_persisted",
@@ -275,16 +280,27 @@ class ChatService:
         if not answer:
             answer = NO_EVIDENCE_REPLY
 
-        citations = state.get("citations") or []
-        bad = [m for m in re.findall(r"\[(\d+)\]", answer) if int(m) > len(citations)]
-        if bad:
-            logger.warning(
-                "citation_out_of_range",
-                extra={"extra_fields": {"bad_ids": bad, "evidence": len(citations)}},
-            )
+        all_citations = state.get("citations") or []
+        citations = self._used_citations(answer, all_citations)
 
         async for event in self._finish(conversation_id, answer, citations, started, emit_text=False):
             yield event
+
+    @staticmethod
+    def _used_citations(answer: str, citations: list[dict]) -> list[dict]:
+        """只返回回答里真正引用到的条目。
+
+        模型可能在大量候选里只用了 [2][5]；也常常在"没找到"时一条都没用。
+        按回答里出现的编号过滤，避免把不相关内容当成"出处"展示。
+        """
+        used = sorted({int(n) for n in re.findall(r"\[(\d+)\]", answer) if 1 <= int(n) <= len(citations)})
+        invalid = [n for n in re.findall(r"\[(\d+)\]", answer) if int(n) > len(citations)]
+        if invalid:
+            logger.warning(
+                "citation_out_of_range",
+                extra={"extra_fields": {"bad_ids": invalid, "candidates": len(citations)}},
+            )
+        return [citations[i - 1] for i in used]
 
     async def _finish(
         self,

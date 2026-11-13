@@ -45,7 +45,10 @@ http.interceptors.response.use(
     const status = resp?.status;
     const code = resp?.data?.code;
 
-    if (status === 401 && code === 2001) {
+    // 登录接口自己的 401 是"账号或密码错误"，不是令牌过期，不能触发刷新/跳转
+    const isLoginCall = String(error.config?.url || "").includes("/auth/login");
+
+    if (status === 401 && code === 2001 && !isLoginCall) {
       const refreshToken = localStorage.getItem("refresh_token");
       if (refreshToken && !error.config.__retried) {
         refreshing ??= axios
@@ -78,7 +81,7 @@ http.interceptors.response.use(
 
     const message = resp?.data?.message || (status ? `请求失败（${status}）` : "网络异常");
     ElMessage.error(message);
-    return Promise.reject(error);
+    return Promise.reject(new Error(message));
   },
 );
 

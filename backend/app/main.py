@@ -15,12 +15,13 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.deps import envelope
 from app.api.v1.router import api_router
-from app.core.config import Settings, get_settings
+from app.core.config import PROJECT_ROOT, Settings, get_settings
 from app.core.errors import AppError, ErrorCode
 from app.core.logging import log_fields, new_trace_id, setup_logging, trace_id_var
 from app.db.pool import Database
@@ -244,6 +245,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(api_router)
 
+    # 前端静态资源（P9-02 单端口方案）：/assets 直出，其余非 /api 路径回 index.html
+    web_dir = PROJECT_ROOT / "frontend" / "dist"
+    if (web_dir / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=web_dir / "assets"), name="assets")
+
+        @app.get("/", include_in_schema=False)
+        async def index_page() -> FileResponse:
+            return FileResponse(web_dir / "index.html")
+
+        @app.get("/favicon.ico", include_in_schema=False)
+        async def favicon() -> FileResponse:
+            icon = web_dir / "favicon.ico"
+            if icon.is_file():
+                return FileResponse(icon)
+            return JSONResponse(status_code=204, content=None)
+
     # ---------- 探针 ----------
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict:
@@ -276,8 +293,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
         return JSONResponse(status_code=200 if ok else 503, content=body)
 
-    @app.get("/", include_in_schema=False)
-    async def root() -> dict:
-        return {"name": "校园智能助手 API", "docs": "/docs", "health": "/healthz"}
+
 
     return app

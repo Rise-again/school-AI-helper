@@ -1,0 +1,49 @@
+:root {
+  color-scheme: light;
+  --el-color-primary: #2563eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  background: #f6f7f9;
+  color: #1f2937;
+}
+
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.page-desc {
+  color: #6b7280;
+  font-size: 13px;
+  margin: 0 0 20px;
+}
+
+.card {
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  padding: 18px;
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 12px 10px 24px;
+  }
+}

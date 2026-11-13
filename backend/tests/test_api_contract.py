@@ -80,3 +80,14 @@ def test_cors_preflight_allows_frontend_origin(client):
     )
     assert resp.status_code == 200
     assert resp.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
+def test_kb_download_requires_auth(client):
+    resp = client.get("/api/v1/kb/files/1/download")
+    assert resp.status_code == 401
+    assert resp.json()["code"] == 2001
+
+
+def test_kb_download_route_registered(client):
+    paths = client.get("/openapi.json").json()["paths"]
+    assert "/api/v1/kb/files/{file_id}/download" in paths

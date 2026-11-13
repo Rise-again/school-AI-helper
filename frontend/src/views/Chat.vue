@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { Plus, Promotion, VideoPause, Link } from "@element-plus/icons-vue";
-import { createConversation, listConversations, listMessages } from "@/api";
+import { createConversation, downloadKbFile, listConversations, listMessages } from "@/api";
 import { streamChat } from "@/api/stream";
 import type { Citation, Conversation } from "@/types";
 
@@ -125,6 +125,23 @@ function stop() {
   ElMessage.info("已停止生成");
 }
 
+/** 打开引用原文：外部链接直接开；知识库文件走鉴权下载再打开 */
+async function openSource(c: Citation) {
+  if (c.url) {
+    window.open(c.url, "_blank", "noopener");
+    return;
+  }
+  if (!c.kb_file_id) return;
+  try {
+    const blob = await downloadKbFile(c.kb_file_id);
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch {
+    ElMessage.error("原文打开失败，请稍后重试");
+  }
+}
+
 function refreshConversationList() {
   listConversations().then((page) => {
     conversations.value = page.items;
@@ -174,10 +191,15 @@ onMounted(loadConversations);
                 <span class="cite-text">
                   [{{ i + 1 }}] {{ c.snippet }}
                 </span>
-                <el-link v-if="c.url" :href="c.url" target="_blank" type="primary" :underline="false">
-                  原文
-                </el-link>
-                <el-tag v-else-if="c.page_no" size="small" type="info">第 {{ c.page_no }} 页</el-tag>
+                <el-tag v-if="c.page_no" size="small" type="info">第 {{ c.page_no }} 页</el-tag>
+                <el-button
+                  v-if="c.url || c.kb_file_id"
+                  link
+                  type="primary"
+                  @click="openSource(c)"
+                >
+                  查看原文
+                </el-button>
               </div>
             </div>
 

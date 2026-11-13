@@ -81,3 +81,10 @@ export async function reindexKbFile(fileId: number) {
 export async function deleteKbFile(fileId: number) {
   await http.delete(`/kb/files/${fileId}`);
 }
+
+
+/** 取知识库原文件（带鉴权），调用方负责转成 objectURL 打开。 */
+export async function downloadKbFile(fileId: number) {
+  const resp = await http.get(`/kb/files/${fileId}/download`, { responseType: "blob" });
+  return resp.data as Blob;
+}

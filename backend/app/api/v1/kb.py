@@ -6,14 +6,32 @@ import json
 from datetime import date
 
 from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from app.api.deps import CurrentUser, envelope, get_kb_service, require_roles
-from app.core.errors import ValidationFailed
+from app.core.errors import NotFound, ValidationFailed
 from app.schemas.common import KbChunkOut, KbFileOut
 from app.services.kb_service import KbService
 
 router = APIRouter(prefix="/kb", tags=["knowledge-base"])
 _admin = require_roles("admin")
+_student_or_admin = require_roles("student", "admin")
+
+_MEDIA_TYPES = {
+    "pdf": "application/pdf",
+    "txt": "text/plain; charset=utf-8",
+    "md": "text/markdown; charset=utf-8",
+    "html": "text/html; charset=utf-8",
+    "htm": "text/html; charset=utf-8",
+    "xls": "application/vnd.ms-excel",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "doc": "application/msword",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+}
 
 
 def _parse_date(raw: str | None, field: str) -> date | None:
@@ -124,3 +142,26 @@ async def delete_file(
 ) -> dict:
     await svc.delete(file_id)
     return envelope(0, "已删除", None)
+
+
+@router.get("/files/{file_id}/download", summary="下载知识库原文件（引用卡片用）")
+async def download_file(
+    file_id: int = Path(ge=1),
+    _user=Depends(_student_or_admin),
+    svc: KbService = Depends(get_kb_service),
+) -> FileResponse:
+    record = await svc.get_file(file_id)
+    path = svc.original_path(record)
+    if not path.is_file():
+        raise NotFound("原始文件不在服务器上，请重新上传")
+
+    ftype = str(record["file_type"]).lower()
+    media_type = _MEDIA_TYPES.get(ftype, "application/octet-stream")
+    # PDF/图片/文本直接在浏览器打开，其余按附件下载
+    inline = ftype in ("pdf", "png", "jpg", "jpeg", "txt", "md", "html", "htm")
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=record["filename"],
+        content_disposition_type="inline" if inline else "attachment",
+    )

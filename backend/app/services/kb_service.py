@@ -123,6 +123,11 @@ class KbService:
                 await self._repo.finish_task(task_id, status="failed", error=str(exc)[:500])
                 logger.exception("index_crashed", extra={"extra_fields": {"file_id": file_id}})
 
+    def original_path(self, record: dict[str, Any]) -> Path:
+        """原始文件在服务器上的落盘路径（按内容 hash 命名）。"""
+        suffix = "." + str(record["file_type"])
+        return self._upload_dir / f"{record['file_hash']}{suffix}"
+
     # ---------- 查询 ----------
     async def list_files(self, *, page: int, size: int, status: str | None) -> dict[str, Any]:
         items, total = await self._repo.list_files(page=page, size=size, status=status)

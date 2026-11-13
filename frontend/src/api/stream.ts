@@ -10,6 +10,7 @@ export function streamChat(
   handlers: {
     onMeta?: (m: StreamMeta) => void;
     onDelta?: (text: string) => void;
+    onReplace?: (text: string) => void;
     onCitations?: (items: Citation[]) => void;
     onDone?: (info: { latency_ms: number; chars: number }) => void;
     onError?: (message: string) => void;
@@ -94,6 +95,10 @@ function dispatch(
       break;
     case "delta":
       handlers.onDelta?.(event.data.text);
+      break;
+    case "replace":
+      // 落地校验后重写：用整段替换已流式输出的内容
+      handlers.onReplace?.(event.data.text);
       break;
     case "citation":
       handlers.onCitations?.(event.data.items);

@@ -23,6 +23,7 @@ from app.agents.state import (
     MODEL_DOWN_REPLY,
     NO_EVIDENCE_REPLY,
     PROMPT_VERSION,
+    REPAIR_PROMPT,
     ROLE_TONE,
     SYSTEM_PROMPT,
     format_evidence,
@@ -34,11 +35,34 @@ from app.core.rate_limit import SlidingWindowLimiter
 from app.integrations.llm_client import LLMClient
 from app.rag.tokens import estimate_tokens
 from app.repositories.conversations import ConversationRepository
+from app.services.grounding import audit_answer, drop_violations, violation_brief
 
 logger = logging.getLogger("campus.chat")
 
 HEARTBEAT_SECONDS = 2.5
 HISTORY_TURNS = 8
+
+
+def _has_substance(text: str) -> bool:
+    """删句/重写之后不能只剩"[2]""参考：[1]"这类空壳。
+
+    只要求去掉标注与参考行后还剩两个字，避免把"每周不超过20小时 [1]。"这种短答误判为空。
+    """
+    body = re.sub(r"参考：[^\n]*", "", text or "")
+    body = re.sub(r"\[\d+\]", "", body)
+    return len(re.findall(r"[一-龥]", body)) >= 2
+
+
+_NOT_FOUND_RE = re.compile(r"(没有|未)(找到|直接说明|明确说明|提及)")
+
+
+def _strip_marks_if_not_found(text: str) -> str:
+    """回答本身就说"资料没写"时，编号和参考行只会造成误解，一并去掉。"""
+    if not _NOT_FOUND_RE.search(text[:40]):
+        return text
+    text = re.sub(r"\n?参考：[^\n]*", "", text)
+    text = re.sub(r"\[\d+\]", "", text)
+    return re.sub(r"[ \t]{2,}", " ", text).strip()
 
 
 class ChatService:
@@ -280,11 +304,66 @@ class ChatService:
         if not answer:
             answer = NO_EVIDENCE_REPLY
 
+        # 落地校验：回答里不能出现资料中没有的具体内容
+        evidence = state.get("evidence") or []
+        audited = _strip_marks_if_not_found(await self._ground(answer, evidence))
+        if audited != answer:
+            logger.info(
+                "answer_grounded",
+                extra={"extra_fields": {"before": answer[:120], "after": audited[:120]}},
+            )
+            answer = audited
+            yield "replace", {"text": answer}
+
         all_citations = state.get("citations") or []
         citations = self._used_citations(answer, all_citations)
 
         async for event in self._finish(conversation_id, answer, citations, started, emit_text=False):
             yield event
+
+    async def _ground(self, answer: str, evidence: list[dict]) -> str:
+        """落地校验：回答里出现的具体名称/材料/数字，必须在资料原文里找得到。
+
+        违规时先让模型按清单重写一次；重写后仍违规，直接删掉涉事句子。
+        宁可少说，也不把捏造的具体信息交给用户。
+        """
+        violations = audit_answer(answer, evidence)
+        if not violations:
+            return answer
+        logger.warning(
+            "answer_ungrounded",
+            extra={"extra_fields": {"spans": violation_brief(violations)[:200]}},
+        )
+        repaired = await self._repair(answer, evidence, violations)
+        if not _has_substance(repaired):
+            # 重写把话删干净了（只剩"[2]"这种），退回原始回答做删句兜底
+            repaired = drop_violations(answer, violations)
+        rest = audit_answer(repaired, evidence)
+        if rest:
+            logger.warning(
+                "answer_ungrounded_after_repair",
+                extra={"extra_fields": {"spans": violation_brief(rest)[:200]}},
+            )
+            repaired = drop_violations(repaired, rest)
+        if not _has_substance(repaired):
+            return NO_EVIDENCE_REPLY
+        return repaired
+
+    async def _repair(
+        self, answer: str, evidence: list[dict], violations: list
+    ) -> str:
+        messages = [
+            {"role": "system", "content": REPAIR_PROMPT.format(bad=violation_brief(violations))},
+            {
+                "role": "user",
+                "content": f"【参考资料】\n{format_evidence(evidence)}\n\n【原回答】\n{answer}",
+            },
+        ]
+        try:
+            fixed = await self._llm.chat(messages, temperature=0.1, max_tokens=600)
+        except ModelUnavailable:
+            return drop_violations(answer, violations)
+        return (fixed or "").strip() or drop_violations(answer, violations)
 
     @staticmethod
     def _used_citations(answer: str, citations: list[dict]) -> list[dict]:
@@ -293,6 +372,9 @@ class ChatService:
         模型可能在大量候选里只用了 [2][5]；也常常在"没找到"时一条都没用。
         按回答里出现的编号过滤，避免把不相关内容当成"出处"展示。
         """
+        # 回答本身就说"资料没写"时，挂三张来源卡片只会让人误解
+        if re.search(r"(没有|未)(找到|直接说明|明确说明|提及)", answer[:40]):
+            return []
         used = sorted({int(n) for n in re.findall(r"\[(\d+)\]", answer) if 1 <= int(n) <= len(citations)})
         invalid = [n for n in re.findall(r"\[(\d+)\]", answer) if int(n) > len(citations)]
         if invalid:

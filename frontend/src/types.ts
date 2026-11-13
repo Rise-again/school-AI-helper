@@ -101,6 +101,7 @@ export interface StreamDone {
 export type StreamEvent =
   | { type: "meta"; data: StreamMeta }
   | { type: "delta"; data: { text: string } }
+  | { type: "replace"; data: { text: string } }
   | { type: "citation"; data: { items: Citation[] } }
   | { type: "done"; data: StreamDone }
   | { type: "error"; data: { message: string } };

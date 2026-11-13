@@ -37,6 +37,10 @@ function send() {
       reply.content += t;
       scroll();
     },
+    onReplace: (t) => {
+      reply.content = t;
+      scroll();
+    },
     onCitations: (items) => {
       reply.citations = items;
     },

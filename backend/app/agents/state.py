@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
-PROMPT_VERSION = "p3-v2"
+PROMPT_VERSION = "p3-v4"
 
 # 生成时的上下文预算：vLLM 侧 max-model-len 是 4096，留出回答空间
 CONTEXT_TOKEN_BUDGET = 3400
@@ -139,6 +139,18 @@ CHITCHAT_PROMPT = """你是海南热带海洋学院的校园智能助手。用�
 用一两句话友好回应，并提示可以问校园政策、办事流程、教务查询等问题。不要编造学校信息。
 
 用户：{query}"""
+
+
+REPAIR_PROMPT = """你刚才的回答里出现了资料中找不到的具体内容：{bad}。
+
+请就地修改这段回答：
+1. 只改有问题的部分——把没依据的说法换成资料里的原话，或直接删掉该分句；
+2. 其余内容**原样保留**，不要整段重写，不要换个说法继续补充；
+3. 不要因为一个词没对上就整段放弃回答；只有当全部内容都找不到依据时，
+   才写"资料中没有直接说明这一点"；
+4. 保留 [编号] 标注和最后一行"参考：[...]"，编号不能超过资料条数。
+
+只输出修改后的回答，不要解释。"""
 
 
 def format_terms(titles: list[str]) -> str:

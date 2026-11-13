@@ -108,6 +108,13 @@ class FakeReranker:
         return [self.score for _ in passages]
 
 
+WEB_OK = (
+    "学校发布通知：本学期寒假自1月13日开始，2月23日返校报到，2月24日正式上课。"
+    "请各学院提前做好学生离校登记与安全教育，假期注意出行安全，"
+    "返校后按学院安排统一领取教材并参加开学第一课。"
+)
+
+
 def make_deps(**kw) -> AgentDeps:
     return AgentDeps(
         llm=kw.get("llm", FakeLLM("kb")),
@@ -167,7 +174,7 @@ def test_kb_weak_hit_triggers_web():
     """知识库分数不足时才补联网。"""
     deps = make_deps(
         retriever=FakeRetriever(score=0.5),
-        search=FakeSearch([{"title": "最新通知", "url": "https://www.hntou.edu.cn/a.html", "content": "寒假安排"}]),
+        search=FakeSearch([{"title": "最新通知", "url": "https://www.hntou.edu.cn/a.html", "content": WEB_OK}]),
     )
     out = run(deps, "今年寒假放假安排")
     assert deps.search.calls == 1
@@ -178,7 +185,7 @@ def test_web_intent_always_searches_even_if_kb_strong():
     deps = make_deps(
         llm=FakeLLM("web"),
         retriever=FakeRetriever(score=0.99),
-        search=FakeSearch([{"title": "公告", "url": "https://zs.hntou.edu.cn/x.html", "content": "最新招生政策"}]),
+        search=FakeSearch([{"title": "公告", "url": "https://zs.hntou.edu.cn/x.html", "content": WEB_OK}]),
     )
     run(deps, "今年招生政策有变化吗")
     assert deps.search.calls == 1
@@ -190,11 +197,27 @@ def test_irrelevant_results_are_dropped_by_rerank():
         llm=FakeLLM("web"),
         retriever=FakeRetriever(chunks=[]),
         reranker=FakeReranker(score=0.05),
-        search=FakeSearch([{"title": "学校首页", "url": "https://www.hntou.edu.cn/", "content": "学校概况"}]),
+        search=FakeSearch(
+            [{"title": "学校首页", "url": "https://www.hntou.edu.cn/", "content": "学校概况" + "校园风光" * 30}]
+        ),
     )
     out = run(deps, "校内有勤工俭学岗位吗")
     assert out["evidence"] == []
     assert out["citations"] == []
+
+
+def test_short_web_snippet_dropped():
+    """导航页/目录页正文太短，不能当证据 —— 修复"正确的废话"。"""
+    deps = make_deps(
+        llm=FakeLLM("web"),
+        retriever=FakeRetriever(chunks=[]),
+        search=FakeSearch(
+            [{"title": "评优评奖", "url": "https://www.hntou.edu.cn/py", "content": "评优评奖… 勤工助学… 联系电话：0898-"}]
+        ),
+    )
+    out = run(deps, "勤工俭学对评优评奖有没有帮助")
+    assert out["trace"][-1]["web"] == 0
+    assert out["evidence"] == []
 
 
 def test_edu_intent_degrades_not_crash():
@@ -218,7 +241,7 @@ def test_web_failure_falls_back_to_kb():
 
 
 def test_web_cache_hit_skips_api_call():
-    cache = FakeCache(hit=[{"title": "缓存命中", "url": "https://x.hntou.edu.cn/1", "content": "内容"}])
+    cache = FakeCache(hit=[{"title": "缓存命中", "url": "https://x.hntou.edu.cn/1", "content": WEB_OK}])
     deps = make_deps(llm=FakeLLM("web"), search=FakeSearch([]), cache=cache)
     out = run(deps, "最新通知")
     assert deps.search.calls == 0
@@ -266,3 +289,76 @@ def test_format_terms_empty():
 
 def test_threshold_constant_is_sane():
     assert 0 < KB_SUFFICIENT_SCORE < 1
+
+
+# ---------- 改写兜底 ----------
+class JsonLLM:
+    def __init__(self, keywords: str, intent: str = "kb"):
+        self.keywords = keywords
+        self.intent = intent
+
+    async def chat(self, messages, **kwargs):
+        import json as _json
+
+        return _json.dumps({"intent": self.intent, "keywords": self.keywords}, ensure_ascii=False)
+
+    async def stream(self, messages, **kwargs):
+        yield "好"
+
+
+class QueryAwareRetriever:
+    """改写关键词检索得差，原句检索得好 —— 模拟改写改偏。"""
+
+    def __init__(self):
+        self.calls: list[str] = []
+
+    async def search(self, query, **kwargs):
+        self.calls.append(query)
+        if query == "勤工俭学 冲突":
+            return [FakeChunk(chunk_id="weak", score=0.28)]
+        return [FakeChunk(chunk_id="good", score=0.91)]
+
+
+def test_weak_keyword_hits_fall_back_to_original_query():
+    retriever = QueryAwareRetriever()
+    deps = AgentDeps(
+        llm=JsonLLM("勤工俭学 冲突"),
+        retriever=retriever,
+        reranker=FakeReranker(),
+        search=FakeSearch(),
+        cache=FakeCache(),
+    )
+    out = run(deps, "勤工俭学会不会和上课时间冲突")
+    assert retriever.calls == ["勤工俭学 冲突", "勤工俭学会不会和上课时间冲突"]
+    assert out["evidence"][0]["chunk_id"] == "good"
+
+
+def test_strong_keyword_hits_skip_original_query():
+    retriever = QueryAwareRetriever()
+    deps = AgentDeps(
+        llm=JsonLLM("勤工助学 影响学习"),
+        retriever=retriever,
+        reranker=FakeReranker(),
+        search=FakeSearch(),
+        cache=FakeCache(),
+    )
+    run(deps, "勤工俭学会不会和上课时间冲突")
+    assert len(retriever.calls) == 1
+
+
+def test_web_snippet_without_sentence_is_dropped():
+    deps = make_deps(
+        llm=FakeLLM("web"),
+        retriever=FakeRetriever(chunks=[]),
+        search=FakeSearch(
+            [
+                {
+                    "title": "学生工作处",
+                    "url": "https://www.hntou.edu.cn/xsc",
+                    "content": "评优评奖 勤工助学 资助育人 心理健康 就业指导 宿舍管理 团委 学生会 联系电话",
+                }
+            ]
+        ),
+    )
+    out = run(deps, "勤工俭学对评优评奖有没有帮助")
+    assert out["evidence"] == []

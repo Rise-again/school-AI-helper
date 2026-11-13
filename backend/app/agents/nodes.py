@@ -38,6 +38,12 @@ _KEYWORDS = {
 KB_SUFFICIENT_SCORE = 0.80
 # 合并重排后的保留阈值
 EVIDENCE_MIN_SCORE = 0.20
+# 联网结果正文少于这个字数就不当证据：官网的导航页、栏目页、目录页
+# 常常只有"评优评奖… 勤工助学… 联系电话…"这类碎片，重排分能到 0.9，
+# 但拿它当依据只会答出正确的废话。
+WEB_MIN_CONTENT_CHARS = 80
+# 关键词改写后知识库最高分低于这个值，说明改写可能改偏了，用原句再检一次兜底
+KB_WEAK_SCORE = 0.50
 
 
 def keyword_intent(query: str) -> str:
@@ -143,10 +149,21 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
         }
 
     async def _kb_search(query: str, keywords: str) -> list[dict[str, Any]]:
-        """静态检索：先用改写后的关键词，没命中再用原句兜底。"""
+        """静态检索：先用改写后的关键词；关键词检索不到像样结果时用原句兜底。
+
+        只判断"是否为空"不够——关键词改偏时仍会返回一堆 0.1 分的碎片，
+        原句反而能查到正确片段，所以以最高分为准再补捡一次。
+        """
         hits = await deps.retriever.search(keywords, top_n=5)
-        if not hits and keywords != query:
-            hits = await deps.retriever.search(query, top_n=5)
+        weak = max((c.score for c in hits), default=0.0) < KB_WEAK_SCORE
+        if keywords != query and weak:
+            extra = await deps.retriever.search(query, top_n=5)
+            merged = {c.chunk_id: c for c in hits}
+            for c in extra:
+                prev = merged.get(c.chunk_id)
+                if prev is None or c.score > prev.score:
+                    merged[c.chunk_id] = c
+            hits = sorted(merged.values(), key=lambda c: c.score, reverse=True)
         return [
             {
                 "chunk_id": c.chunk_id,
@@ -196,6 +213,17 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
 
     @staticmethod
     def _web_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        kept = []
+        for it in items:
+            text = " ".join(str(it.get("content") or "").split())
+            # 长度够 + 至少有一个完整句子，才算"能当依据的网页正文"
+            if len(text) >= WEB_MIN_CONTENT_CHARS and "。" in text:
+                kept.append(it)
+        if len(kept) < len(items):
+            logger.info(
+                "web_items_unusable_dropped",
+                extra={"extra_fields": {"total": len(items), "kept": len(kept)}},
+            )
         return [
             {
                 "chunk_id": f"web-{i}",
@@ -208,7 +236,7 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
                 "score": 0.0,  # 未打分，交给重排
                 "origin": "web",
             }
-            for i, it in enumerate(items)
+            for i, it in enumerate(kept)
         ]
 
     async def retrieve(state: AgentState) -> dict:

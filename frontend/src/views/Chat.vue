@@ -94,6 +94,11 @@ async function send() {
         reply.content += t;
         scrollToBottom();
       },
+      onReplace: (t) => {
+        // 落地校验命中：服务端已重写或删掉无依据的句子，这里整段替换
+        reply.content = t;
+        scrollToBottom();
+      },
       onCitations: (items) => {
         reply.citations = items;
         scrollToBottom();

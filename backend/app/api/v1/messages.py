@@ -1,6 +1,8 @@
 """流式对话接口（SSE）。
 
-事件序列：meta → delta* → citation → done
+事件序列：meta → delta* → [replace] → citation → done
+replace：落地校验命中（回答里有资料中没有的具体内容）时，服务端重写或删句，
+         前端用其中的 text 整段替换已显示的内容。
 异常：error（此时消息可能未落库，前端提示重试）
 心跳：`: ping` 注释行，每 2.5 秒一次，防止代理 4 秒空闲超时断流。
 """

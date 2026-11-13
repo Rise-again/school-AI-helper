@@ -101,7 +101,7 @@ class Settings(BaseModel):
     chroma_collection: str = "campus_kb"
     rag_top_k: int = Field(default=20, ge=1, le=200)
     rag_top_n: int = Field(default=5, ge=1, le=50)
-    rag_score_threshold: float = Field(default=0.35, ge=0.0, le=1.0)
+    rag_score_threshold: float = Field(default=0.20, ge=0.0, le=1.0)
     embed_batch_size: int = Field(default=32, ge=1, le=128)
 
     # 数据获取

@@ -182,3 +182,14 @@
 - **修掉两个真 bug**：
   1. 短文本（<50 可见字符）被误判为"文本层缺失"送去 OCR，而 OCR 只认 PDF/图片 → 索引失败。改为只有 PDF/图片走 OCR；顺带补上了图片上传通道（学生拍通知照片的场景）。
   2. `check_env.py` 把 Node 不达标判成 FAIL，但 Node 只用于前端构建、后端运行不需要；Python 3.10 的硬判断也与实际的 3.11 冲突。
+
+**P2-01 / P2-06 收口（2026-11-13）**
+- 收到 21 份真实文档（13 PDF 含 11 份扫描件、4 Excel、2 份老格式转 PDF）与 40 条问答（20 题有标准文档、20 题库外）。
+- 首轮解析只有 6 份成功，修掉 3 个问题后 **21/21 全部成功，共 306 个切片**：
+  1. PaddleOCR 3.x 的 `predict()` 只吃 ndarray，传 PIL 图被静默忽略 → 转 BGR ndarray；
+  2. Paddle 3.3 的 MKLDNN 在 CPU 上对 PIR 属性抛 NotImplementedError → `enable_mkldnn=False`；
+  3. 结果对象要取 `.json["res"]["rec_texts"]`，不是属性。
+- Excel 失败是 markitdown 缺 pandas/xlrd → 改用 `markitdown[xlsx,xls]`。
+- 老 `.doc` 与一份异常 `.docx` 用 LibreOffice 转 PDF 后入库。
+- OCR 客户端超时 120s → 900s（CPU 每页约 30 秒）。
+- **评测结果（40 题）**：Recall@5 = 100%（20/20），Top-1 = 100%，库外问题空结果率 55%。阈值由 0.35 调到 0.20——依据是正确文档重排分 0.248、无关内容 0.075，0.35 会把正确结果卡掉。

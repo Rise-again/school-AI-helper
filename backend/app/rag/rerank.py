@@ -21,7 +21,7 @@ class RerankerClient(Protocol):
 
 
 class HttpRerankerClient:
-    def __init__(self, base_url: str, *, model: str = "bge-reranker-v2-m3", timeout: float = 30.0) -> None:
+    def __init__(self, base_url: str, *, model: str = "bge-reranker-v2-m3", timeout: float = 120.0) -> None:
         self._base = base_url.rstrip("/")
         self._model = model
         self._timeout = timeout

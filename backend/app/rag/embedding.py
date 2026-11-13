@@ -30,7 +30,7 @@ class HttpEmbeddingClient:
         *,
         model: str = "bge-large-zh-v1.5",
         batch_size: int = 32,
-        timeout: float = 60.0,
+        timeout: float = 180.0,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._model = model

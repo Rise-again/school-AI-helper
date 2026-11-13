@@ -33,7 +33,7 @@ class NullOcrClient:
 
 
 class HttpOcrClient:
-    def __init__(self, base_url: str, *, timeout: float = 120.0) -> None:
+    def __init__(self, base_url: str, *, timeout: float = 900.0) -> None:  # CPU OCR 每页约 30s，整份可能数分钟
         self._base = base_url.rstrip("/")
         self._timeout = timeout
 

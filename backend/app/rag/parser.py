@@ -124,8 +124,8 @@ class DocumentParser:
             pages = []
             channel = "ocr"
         elif suffix == ".pdf" and self._pdf_mode == "page":
-            pages, warnings = await self._parse_pdf(path)
-            channel = "pdf-text"
+            pages, warnings, used_ocr = await self._parse_pdf(path)
+            channel = "pdf-text+ocr" if used_ocr else "pdf-text"
         else:
             md = await asyncio.to_thread(_to_markdown, path)
             pages = [PageText(page_no=None, text=_clean(md))]
@@ -156,20 +156,22 @@ class DocumentParser:
     def _visible(pages: list[PageText]) -> int:
         return len(_WS.sub("", "".join(p.text for p in pages)))
 
-    async def _parse_pdf(self, path: Path) -> tuple[list[PageText], list[str]]:
+    async def _parse_pdf(self, path: Path) -> tuple[list[PageText], list[str], bool]:
         raw_pages = await asyncio.to_thread(_pdf_pages, path)
         pages = [PageText(page_no=i + 1, text=_clean(t)) for i, t in enumerate(raw_pages)]
         warnings: list[str] = []
 
         thin = [p.page_no for p in pages if p.page_no and len(_WS.sub("", p.text)) < self._min_chars]
+        used_ocr = False
         if thin:
             ocr_text = await self._ocr.ocr_file(path, pages=thin)
             if ocr_text:
                 pages = self._merge_ocr(pages, ocr_text)
+                used_ocr = True
                 warnings.append(f"{len(thin)} 页文本层缺失，已用 OCR 补齐")
             else:
                 warnings.append(f"{len(thin)} 页文本层缺失，OCR 未返回内容")
-        return pages, warnings
+        return pages, warnings, used_ocr
 
     @staticmethod
     def _merge_ocr(pages: list[PageText], ocr_text: dict[int, str]) -> list[PageText]:

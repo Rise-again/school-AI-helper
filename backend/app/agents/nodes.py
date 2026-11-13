@@ -10,7 +10,7 @@ import logging
 from dataclasses import asdict
 from typing import Any, Awaitable, Callable
 
-from app.agents.state import INTENT_PROMPT, INTENTS, REWRITE_PROMPT, AgentState, format_context
+from app.agents.state import INTENTS, ROUTER_PROMPT, AgentState, format_context
 from app.core.errors import DependencyUnavailable, ModelUnavailable
 from app.integrations.anysearch import AnySearchClient
 from app.integrations.llm_client import LLMClient
@@ -49,22 +49,43 @@ class AgentDeps:
         self.cache = cache
 
 
-async def classify_intent(llm: LLMClient, query: str, history: list[dict[str, str]] | None = None) -> str:
-    """LLM 分类，失败时退回关键词规则。带上文是为了让"什么时候发放"这类追问落在正确意图上。"""
+async def route_query(
+    llm: LLMClient, query: str, history: list[dict[str, str]] | None = None
+) -> tuple[str, str]:
+    """一次调用同时得到意图与检索关键词（分类+改写合并，省一次模型往返）。
+
+    返回 (intent, keywords)；模型不可用时退回关键词规则 + 原句。
+    """
+    import json as _json
+
     intent = keyword_intent(query)
+    keywords = query
     ctx = format_context(history or [])
     try:
-        label = await llm.chat(
-            [{"role": "user", "content": INTENT_PROMPT.format(query=query, context=ctx)}],
+        raw = await llm.chat(
+            [{"role": "user", "content": ROUTER_PROMPT.format(query=query, context=ctx)}],
             temperature=0.0,
-            max_tokens=8,
+            max_tokens=64,
         )
-        cleaned = label.strip().lower().strip("。.：:")
-        if cleaned in INTENTS:
-            intent = cleaned
+        text = raw.strip()
+        if text.startswith("```"):
+            text = text.strip("`").split("\n", 1)[-1]
+        data = _json.loads(text[text.index("{"): text.rindex("}") + 1])
+        label = str(data.get("intent", "")).lower()
+        if label in INTENTS:
+            intent = label
+        kw = " ".join(str(data.get("keywords", "")).split())[:40].strip("。.")
+        if kw:
+            keywords = kw
     except ModelUnavailable:
-        logger.warning("intent_llm_unavailable, fallback to keywords")
-    return intent
+        logger.warning("router_llm_unavailable, fallback to keywords")
+    except (ValueError, KeyError):
+        logger.warning("router_output_unparsable, fallback to keywords")
+    return intent, keywords
+
+
+async def classify_intent(llm: LLMClient, query: str, history: list[dict[str, str]] | None = None) -> str:
+    return (await route_query(llm, query, history))[0]
 
 
 def _trace(state: AgentState, node: str, **fields: Any) -> list[dict]:
@@ -75,8 +96,12 @@ def _trace(state: AgentState, node: str, **fields: Any) -> list[dict]:
 
 def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[dict]]]:
     async def classify(state: AgentState) -> dict:
-        intent = await classify_intent(deps.llm, state["query"], state.get("history"))
-        return {"intent": intent, "trace": _trace(state, "classify", intent=intent)}
+        intent, keywords = await route_query(deps.llm, state["query"], state.get("history"))
+        return {
+            "intent": intent,
+            "keywords": keywords,
+            "trace": _trace(state, "classify", intent=intent, keywords=keywords),
+        }
 
     async def rewrite_query(query: str, history: list[dict[str, str]] | None = None) -> str:
         """口语问题转检索关键词，并消解指代（"那…"要结合上文）；失败就用原句。"""
@@ -93,7 +118,7 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
 
     async def kb_node(state: AgentState) -> dict:
         query = state["query"]
-        rewritten = await rewrite_query(query, state.get("history"))
+        rewritten = state.get("keywords") or query
         chunks = await deps.retriever.search(rewritten, top_n=5)
         if not chunks and rewritten != query:
             # 改写没命中时用原句兜底，避免改写把结果改丢

@@ -220,3 +220,17 @@
 **踩坑**
 - 提示词约束写过头（"不得使用范围外编号"）会让模型干脆不标引用，改为正面示例后才恢复。
 - `chat_service` 里 `citations` 变量在定义前被引用，抛 NameError 导致助手消息不落库，已修。
+
+**P3 收尾（2026-11-13）**
+- 补上**访客匿名通道** `POST /api/v1/chat/anonymous`（不落库、按 IP 限流每分钟 20 次）；访客问教务类会提示先登录，不会吐出个人数据。
+- 修复**断线不落库**：生成器在 `yield` 处被取消时走 `except (CancelledError, GeneratorExit)`，用 `asyncio.shield` 保住已生成内容。实测断开后 user+assistant 两条都在。
+- 修复**模型不可用返回 error 事件**：改为一句话降级话术（MODEL_DOWN_REPLY），不再暴露异常类型。
+- 补 **token 预算裁剪**：历史按 token 从旧到新裁，历史占一半预算（1400 token），超长会话不会撑爆 4K。
+- **分类与改写合并成一次 LLM 调用**（输出 JSON：intent + keywords），省一次模型往返。
+- AnySearch 超时 12s→5s，符合"5 秒内降级"。
+- vLLM 参数：`gpu-memory-utilization 0.75`、`max-num-seqs 16`（原 0.70/8，10 并发会排队）。
+
+**实测**
+- 路由准确率 **92%**（23/25，固化为 `scripts/evaluate_routing.py` + 25 条用例，可复现）。
+- 10 并发首 token：**中位数 2.51s、最大 2.99s**（冷启动首次约 3.5s）。
+- 访客问"我的课表" → 登录提示；问"学校有几个校区" → 无依据拒答（知识库确实没有）。

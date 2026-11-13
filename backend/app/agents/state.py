@@ -10,6 +10,9 @@ from typing import Any, TypedDict
 
 PROMPT_VERSION = "p3-v1"
 
+# 生成时的上下文预算：vLLM 侧 max-model-len 是 4096，留出回答空间
+CONTEXT_TOKEN_BUDGET = 2800
+
 INTENTS = ("kb", "web", "edu", "chitchat", "unknown")
 
 
@@ -20,11 +23,28 @@ class AgentState(TypedDict, total=False):
     role: str
     history: list[dict[str, str]]
     intent: str
+    keywords: str  # 路由同时产出的检索关键词
     evidence: list[dict[str, Any]]
     citations: list[dict[str, Any]]
     trace: list[dict[str, Any]]
     degraded: str  # 非空表示某个环节降级，回答里要如实提示
 
+
+ROUTER_PROMPT = """你是校园问答系统的路由器。只输出一行 JSON，不要解释、不要代码块。
+
+{{"intent": "<kb|web|edu|chitchat|unknown>", "keywords": "<检索关键词>"}}
+
+intent 取值：
+- kb：学校的规章制度、办事流程、资助政策、奖惩办法等，答案在知识库里
+- web：最新通知、公告、近期活动等时效性信息
+- edu：本人的课表、成绩、学分、绩点等个人教务数据
+- chitchat：打招呼、闲聊、问你是谁
+- unknown：看不懂或与校园无关
+
+keywords 规则：把问题改写成适合检索的关键词（空格分隔，≤20 字）；含"那/刚才/上面"等指代时结合上文补全主语；intent 为 chitchat/unknown/edu 时留空。
+
+{context}用户问题：{query}
+JSON："""
 
 INTENT_PROMPT = """你是校园问答系统的意图分类器。只输出一个标签，不要解释。
 
@@ -71,6 +91,16 @@ SYSTEM_PROMPT = """你是海南热带海洋学院的校园智能助手。当前�
 NO_EVIDENCE_REPLY = (
     "我没有在知识库里找到与这个问题直接相关的依据，为避免给出错误信息，这里不做推测。\n\n"
     "建议直接咨询相关部门，或在官网查看最新通知。"
+)
+
+GUEST_EDU_REPLY = (
+    "查询课表、成绩这类个人数据需要先登录（学号绑定）。\n\n"
+    "登录后我就能帮你查了；不登录也可以先问招生政策、办事流程这些公开信息。"
+)
+
+MODEL_DOWN_REPLY = (
+    "抱歉，回答服务暂时不可用，请稍后再试。\n\n"
+    "已检索到的资料不受影响，你也可以先到学校官网查看相关通知。"
 )
 
 EDU_DEGRADED_REPLY = (

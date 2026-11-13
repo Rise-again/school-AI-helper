@@ -35,7 +35,7 @@ class AnySearchClient:
         *,
         zone: str = "cn",
         domain_suffix: str = "hntou.edu.cn",
-        timeout: float = 12.0,
+        timeout: float = 5.0,  # 计划要求超时 5s 内降级
         max_results: int = 8,
     ) -> None:
         self._base = base_url.rstrip("/")

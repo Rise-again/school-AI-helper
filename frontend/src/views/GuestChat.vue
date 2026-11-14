@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref } from "vue";
+import { nextTick, reactive, ref } from "vue";
 import { Link } from "@element-plus/icons-vue";
 import { streamChat } from "@/api/stream";
 import type { Citation } from "@/types";
@@ -26,7 +26,7 @@ function send() {
   const text = input.value.trim();
   if (!text || sending.value) return;
   turns.value.push({ role: "user", content: text });
-  const reply: Turn = { role: "assistant", content: "", streaming: true };
+  const reply = reactive<Turn>({ role: "assistant", content: "", streaming: true });
   turns.value.push(reply);
   input.value = "";
   sending.value = true;

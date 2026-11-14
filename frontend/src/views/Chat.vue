@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { Plus, Promotion, VideoPause, Link, RefreshRight } from "@element-plus/icons-vue";
 import MarkdownIt from "markdown-it";
@@ -104,12 +104,14 @@ async function submit(text: string) {
   }
 
   const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: "user", content: text };
-  const reply: ChatMessage = {
+  // 必须是响应式对象：直接 push 普通对象后逐 token 改它是不会触发渲染的，
+  // 表现就是"等半天，整段回答一次性蹦出来"
+  const reply = reactive<ChatMessage>({
     id: `a-${Date.now()}`,
     role: "assistant",
     content: "",
     streaming: true,
-  };
+  });
   messages.value.push(userMsg, reply);
   sending.value = true;
   scrollToBottom();

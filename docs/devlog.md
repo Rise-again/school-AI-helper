@@ -372,3 +372,8 @@
 - 对比（60 题、同一证据/提示词）：违规 18→8、有违规回答 12→6、标注覆盖率 0.49→0.89、库外拒答 0→0.10、可答误拒 0→0、长度 174→155、非流式 2.67s→4.44s；流式首字不变（0.14–0.19s），生成速度约慢一倍。用户查看 12 条对照后选择上线微调。
 - 上线：vLLM 以 `--enable-lora --lora-modules campus-lora=.../output` 启动，后端 `LLM_MODEL=campus-lora` 并重启；`model_version` 登记 `campus-lora-p4-v1`（eval_score 0.1908）。
 - 配套：新增编号收敛 `clamp_citations`（每句最多 2 个、按证据分保留，不改提示词版本）；`start.sh` 检测 adapter 目录后自动挂载；新增 2 条单测，全量 141 通过 5 跳过。
+
+**关机前备份（2026-11-14 深夜）**
+- 平台备份镜像由用户在控制台创建（只含系统盘，不含 `/hy-tmp`）。
+- OSS 备份失败：实例上 `oss` 登录态过期（401）；下次开机 `oss login` 后补 `bash scripts/backup.sh --full`。
+- 已做本地兜底：`D:\Desktop\CamScanner\campus-backup-2026-11-14-2356\`（147MB 代码+adapter+SFT 数据 bundle、150KB 数据库导出、README 恢复说明）。

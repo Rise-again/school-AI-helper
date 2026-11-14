@@ -341,3 +341,21 @@
 - 三项设计经用户确认，已同步进计划 v1.12（D-08）：①会话**进程内缓存、不落库**（school-sdk 会话对象不可安全序列化；服务重启或失效即用密文口令重登一次）；②对话中的课表/成绩/学分**模板直出、不经过 LLM**（数据即答案，避免模型复述引入编造）；③限频按**页面刷新**计（一次页面加载并发请求三个接口视为一次刷新，冷却期内走缓存），不再按单接口 1 次/分钟误伤自己。
 - 环境核查：沙箱直连 `zfjw.hntou.edu.cn` 返回 502（约 5s，疑似拦截非国内出口），因此连通性验证必须在华东服务器上执行；用户提供 SSH 访问方式，后续探测、部署、联调由我直接在服务器执行。
 - 下一步：`scripts/edu_probe.py` 在服务器临时 venv 跑通（登录 → check_session → get_info → 本学期课表/成绩），确认学期参数与返回结构后再实现适配层。
+- 探测受阻（2026-11-14）：云服务器到 `zfjw.hntou.edu.cn`（210.37.144.184）80/443/8080/8443 全部超时、ping 不通，而同校 `www`（301）、`jwc`（200）、`zs`（200）均可达——教务系统按来源 IP 限制为**校内网访问**，触发风险 R2 的"外网不可达"分支。待定通路：校园网反向隧道 / 学校 VPN 装到服务器 / WebVPN / 降级为仅校内演示。
+- 依赖说明：PyPI `school-sdk 1.8.1` 在 `login.py` 顶层 import 验证码模块，间接强依赖 torch/torchvision（约 2GB）；GitHub master（v1.9.0，commit 7c1b7be）已把 torch 改为可选、按需懒加载。服务器上以本地 wheel 安装 1.9.0，**web venv 无需 torch**。版本矩阵的 1.8.1 口径待用户确认后改为"1.9.0（GitHub 7c1b7be，本地 wheel）"。
+
+**P5 实现：教务适配层、六接口与对话直出（2026-11-14）**
+- 结构：`integrations/edu/client.py` 是唯一 import school-sdk 的地方（`SchoolSdkEduClient`，同步 SDK 用 `asyncio.to_thread` 包）；`services/edu_mapping.py` 放纯映射函数（本地脚本可单独复用）；`services/edu_service.py` 管绑定、会话、缓存、冷却与模板回答；`api/v1/edu.py` 六个接口，仅学生本人。
+- 凭据：`student_profile.edu_cred_cipher` 存 AES-256-GCM 密文（nonce+ct，AAD 绑 user_id），密钥优先 `EDU_CRED_KEY`，留空由 `JWT_SECRET` 派生；日志不出现口令。
+- 会话：进程内缓存 `UserClient`；上游抛会话失效就重登一次再试（对齐 UC-S2）；同一用户的上游调用用 `asyncio.Lock` 串行化，避免 SDK 会话并发。
+- 缓存：课表/成绩按学期 TTL 600s；同一用户"刷新级"冷却 60s——教务页并发三接口时，冷却期内直接给缓存/旧值，不重复打上游。
+- 映射：课表 `week_day/section/place/weeks_text` → `weekday/sections/location/weeks`；成绩 `exam_result/credit/grade_point` → `course/credit/score/gpa/term`；学分按"通过才计入"聚合，类别取 `course_nature`，`required` 留 0（培养方案不在教务接口里，按 UC-S5 只显示已修并说明）。
+- 对话：`edu` 意图不进检索；节点拿真实数据把答案拼好放 `state.direct_reply`，`_fixed_reply` 直接返回，不经过生成模型（零编造）。未绑定/管理员/游客/上游故障各有话术。
+- 测试：新增 15 条（学期换算、映射、学分聚合、加密回环与 AAD、绑定/解绑、缓存命中、会话重登、冷却、503 映射、401/403、OpenAPI），全量 134 通过 5 跳过。
+- 部署：web venv 装本地补丁 wheel；后端重启，`/readyz` 全绿；`/edu/status` 未登录 401。
+- 真实字段核对：本机探测已拿到真实课表/成绩结构（`week_day=1`、`section=1-2`、`credit=4`、`grade_point=2.20`、`exam_result=不合格` 等），映射按此实现并用等价样例固化进单测。
+
+**决策 D-09：教务按用户网络直连，不做隧道（2026-11-14）**
+- 背景：校方当日把 `zfjw.hntou.edu.cn` 改成只对校园网放行；校园网又无法访问外网，反向隧道从校园网机器发不出去。
+- 决策：按用户网络直连；教务可达就查，不可达就报错反馈（503/6001 + 对话降级）。不写隧道、代理、双网卡之类绕行，答辩演示按实际网络环境来。
+- 另外确认：学校正方登录无图形验证码；SDK 内置端点缺 `/jwglxt` 前缀，统一由 `EDU_BASE_PATH` 补齐。

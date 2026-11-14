@@ -107,6 +107,8 @@ cd "$REPO_ROOT"
 echo "  → web（后端）"
 "$VENV_DIR/web/bin/pip" install -q -U pip
 "$VENV_DIR/web/bin/pip" install -q -r backend/requirements-linux.txt
+# 教务 SDK：本地补丁版（去掉无用的 ast.Bytes 导入、剔除未使用的验证码模型，无需 torch）
+"$VENV_DIR/web/bin/pip" install -q vendor/school_sdk-1.9.0.post1-py3-none-any.whl
 
 echo "  → models（bge + OCR）"
 "$VENV_DIR/models/bin/pip" install -q -U pip

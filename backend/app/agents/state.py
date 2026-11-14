@@ -29,6 +29,7 @@ class AgentState(TypedDict, total=False):
     citations: list[dict[str, Any]]
     trace: list[dict[str, Any]]
     degraded: str  # 非空表示某个环节降级，回答里要如实提示
+    direct_reply: str  # 非空表示跳过生成模型，直接把这段文字作为回答（教务数据类问题）
 
 
 ROUTER_PROMPT = """你是校园问答系统的路由器。只输出一行 JSON，不要解释、不要代码块。

@@ -51,6 +51,23 @@
 
 见开发计划附录 A；P1 起每个接口补请求/响应示例与错误分支，并在 `/docs` 中核对 OpenAPI 契约。
 
+### 5.1 教务接口（P5）
+
+仅学生角色，仅本人数据；口令用 AES-GCM 密文存 `student_profile.edu_cred_cipher`，服务端不保存明文。会话为进程内缓存，失效后自动重登一次。
+
+| 方法 | 路径 | 请求 | 响应 `data` |
+|---|---|---|---|
+| GET | `/edu/status` | — | `{bound, student_no, updated_at}`；不访问教务 |
+| POST | `/edu/bind` | `{student_no, password}` | 同 status；先登录验证再落库 |
+| DELETE | `/edu/bind` | — | `null` |
+| GET | `/edu/schedule` | — | `{items: [{weekday, sections, course, teacher, location, weeks}]}`，本学期 |
+| GET | `/edu/grades` | `?term=2025-2026-2`（可选） | `{terms: [], items: [{course, credit, score, gpa, term}]}` |
+| GET | `/edu/credits` | — | `{required, earned, gpa, categories: [{name, required, earned}]}` |
+
+错误分支：未绑定 → 400/1001（"尚未绑定教务账号"）；教务账号密码错 → 400/1001；教务不可达（校园网限制、系统故障、超时）→ 503/6001，message 为"教务系统暂时无法访问"，前端提示稍后重试；管理员 → 403/2002。
+
+对话中的"我的课表/成绩/学分"由 `edu` 意图节点直接查上述数据并以模板作答，不经过大模型，因此不会编造；教务不可达时回复同样的降级话术。
+
 ## 6. 版本策略
 
 破坏性变更升 `/api/v2`，旧版保留一个迭代。非破坏性变更（新增字段）直接在当前版本加，前端必须容忍未知字段。

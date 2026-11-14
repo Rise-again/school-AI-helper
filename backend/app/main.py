@@ -45,7 +45,9 @@ from app.integrations.llm_client import LLMClient
 from app.repositories.search_cache import SearchCacheRepository
 from app.services.chat_service import ChatService
 from app.services.conversation_service import ConversationService
+from app.services.edu_service import EduService
 from app.services.kb_service import KbService
+from app.integrations.edu import SchoolSdkEduClient
 
 logger = logging.getLogger("campus")
 
@@ -64,6 +66,11 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     app.state.auth_service = AuthService(settings, UserRepository(db))
     app.state.conversation_service = ConversationService(ConversationRepository(db))
+    app.state.edu_service = EduService(
+        settings=settings,
+        users=UserRepository(db),
+        client=SchoolSdkEduClient(settings),
+    )
 
     kb_repo = KbRepository(db)
     try:
@@ -145,6 +152,7 @@ async def lifespan(app: FastAPI):
             search_daily_quota=settings.anysearch_daily_quota,
             search_user_daily_quota=settings.search_user_daily_quota,
             kb_titles_provider=kb_titles,
+            edu=app.state.edu_service,
         )
     )
     app.state.chat_service = ChatService(

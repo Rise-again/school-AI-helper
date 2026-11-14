@@ -70,6 +70,36 @@ class UserRepository:
             await cur.execute(sql, (user_id,))
             return await cur.fetchone()
 
+    async def get_edu_binding(self, user_id: int) -> dict[str, Any] | None:
+        """教务绑定信息（含密文，调用方负责解密，不要写进日志）。"""
+        sql = (
+            "SELECT student_no, edu_username, edu_cred_cipher, edu_bound_at "
+            "FROM student_profile WHERE user_id = %s"
+        )
+        async with self._db.cursor() as cur:
+            await cur.execute(sql, (user_id,))
+            return await cur.fetchone()
+
+    async def save_edu_binding(
+        self, *, user_id: int, student_no: str, edu_username: str, cred_cipher: bytes
+    ) -> None:
+        sql = (
+            "INSERT INTO student_profile (user_id, student_no, edu_username, edu_cred_cipher, edu_bound_at) "
+            "VALUES (%s, %s, %s, %s, NOW()) "
+            "ON DUPLICATE KEY UPDATE edu_username = VALUES(edu_username), "
+            "edu_cred_cipher = VALUES(edu_cred_cipher), edu_bound_at = NOW()"
+        )
+        async with self._db.cursor() as cur:
+            await cur.execute(sql, (user_id, student_no, edu_username, cred_cipher))
+
+    async def clear_edu_binding(self, user_id: int) -> None:
+        sql = (
+            "UPDATE student_profile SET edu_username = NULL, edu_cred_cipher = NULL, "
+            "edu_bound_at = NULL WHERE user_id = %s"
+        )
+        async with self._db.cursor() as cur:
+            await cur.execute(sql, (user_id,))
+
     async def count(self) -> int:
         return int(await self._db.scalar("SELECT COUNT(*) AS c FROM user_account") or 0)
 

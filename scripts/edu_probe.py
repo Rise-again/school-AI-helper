@@ -4,7 +4,7 @@
 用于确认学期参数与 SDK 返回结构，再据此实现对适配层。
 
 用法（服务器上，school-sdk 已安装）：
-    EDU_PASSWORD='***' python scripts/edu_probe.py --account 252650005 --year 2026 --term 1
+    EDU_PASSWORD='***' python scripts/edu_probe.py --account 20250001 --year 2026 --term 1
 
 密码只从环境变量或交互输入读取，不落盘、不打印、不进 shell 历史。
 本脚本不做任何写操作。
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import faulthandler
 import logging
 import os
 import sys
@@ -21,7 +22,8 @@ from datetime import date
 from getpass import getpass
 from typing import Any
 
-logging.disable(logging.CRITICAL)  # SDK 内部日志可能带请求细节，探测阶段关闭
+# 默认静音（SDK 日志可能带请求细节）；--debug 时打开 requests 级日志定位卡点
+logging.disable(logging.CRITICAL)
 
 
 def default_year_term() -> tuple[int, int]:
@@ -65,7 +67,21 @@ def short(value: Any, limit: int = 60) -> str:
 
 
 def step(title: str) -> None:
-    print(f"\n===== {title} =====")
+    print(f"\n===== {title} =====", flush=True)
+
+
+def endpoints_with_base(base_path: str) -> dict[str, Any]:
+    """学校教务挂在 /jwglxt 下，SDK 内置端点没有这个前缀，这里统一补上。"""
+    from school_sdk.config import URL_ENDPOINT
+
+    def fix(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: fix(v) for k, v in value.items()}
+        if isinstance(value, str) and value.startswith("/"):
+            return base_path + value
+        return value
+
+    return {k: fix(v) for k, v in URL_ENDPOINT.items()}
 
 
 def main() -> int:
@@ -78,7 +94,20 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=int(os.getenv("EDU_PORT", "80")))
     parser.add_argument("--ssl", action="store_true", default=os.getenv("EDU_SSL", "false").lower() == "true")
     parser.add_argument("--timeout", type=float, default=float(os.getenv("EDU_TIMEOUT_S", "15")))
+    parser.add_argument("--debug", action="store_true", help="打开请求日志，并在卡住 45 秒后打印调用栈")
+    parser.add_argument("--dump", action="store_true", help="打印课表首条与成绩前 3 条的完整 JSON，用于确认字段结构")
+    parser.add_argument(
+        "--base-path",
+        default=os.getenv("EDU_BASE_PATH", "/jwglxt"),
+        help="教务系统路径前缀（默认 /jwglxt）",
+    )
     args = parser.parse_args()
+
+    if args.debug:
+        logging.disable(logging.NOTSET)
+        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(name)s %(message)s")
+        # 卡住 45 秒后把当前调用栈打出来，定位到底停在哪个请求
+        faulthandler.dump_traceback_later(45, repeat=True)
 
     account = args.account or input("学号: ").strip()
     password = os.getenv("EDU_PASSWORD") or getpass("教务密码（不回显）: ")
@@ -96,6 +125,7 @@ def main() -> int:
         exist_verify=False,  # 用户已确认学校无验证码
         retry=2,
         timeout=args.timeout,
+        url_endpoints=endpoints_with_base(args.base_path),
     )
     print("SchoolClient 就绪，参数字典:", summarize(getattr(client, "__dict__", {})))
 
@@ -113,10 +143,20 @@ def main() -> int:
     step(f"课表 get_schedule(year={args.year}, term={args.term})")
     schedule = user.get_schedule(year=args.year, term=args.term)
     print(summarize(schedule, max_items=5))
+    if args.dump and isinstance(schedule, dict) and schedule.get("course_list"):
+        import json
+
+        print("首条课程完整 JSON:")
+        print(json.dumps(schedule["course_list"][0], ensure_ascii=False, indent=2))
 
     step(f"成绩 get_score(year={args.year}, term={args.term})")
     score = user.get_score(year=args.year, term=args.term)
     print(summarize(score, max_items=5))
+    if args.dump and isinstance(score, dict) and score:
+        import json
+
+        print("成绩前 3 条完整 JSON:")
+        print(json.dumps(list(score.values())[:3], ensure_ascii=False, indent=2))
 
     step("完成")
     print(f"学年参数：year={args.year}, term={args.term}（按自然月推断，可 --year/--term 覆盖）")

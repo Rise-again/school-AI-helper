@@ -16,6 +16,7 @@ from app.services.auth_service import AuthService
 from app.services.conversation_service import ConversationService
 from app.rag.retriever import Retriever
 from app.services.chat_service import ChatService
+from app.services.edu_service import EduService
 from app.services.kb_service import KbService
 
 _bearer = HTTPBearer(auto_error=False)
@@ -43,6 +44,10 @@ def get_kb_service(request: Request) -> KbService:
 
 def get_chat_service(request: Request) -> ChatService:
     return request.app.state.chat_service
+
+
+def get_edu_service(request: Request) -> EduService:
+    return request.app.state.edu_service
 
 
 def get_retriever(request: Request) -> Retriever:

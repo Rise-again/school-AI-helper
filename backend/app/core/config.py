@@ -115,8 +115,13 @@ class Settings(BaseModel):
     edu_host: str = "zfjw.hntou.edu.cn"
     edu_port: int = Field(default=80, ge=1, le=65535)
     edu_ssl: bool = False
+    edu_base_path: str = "/jwglxt"  # 学校教务挂在 /jwglxt 下，SDK 内置端点没有这个前缀
     edu_timeout_s: float = Field(default=10.0, gt=0)
     edu_retry: int = Field(default=2, ge=0, le=5)
+    edu_cred_key: str = ""  # 32 字节十六进制；留空则由 JWT_SECRET 派生，仅课程项目使用
+    edu_cache_ttl_s: int = Field(default=600, ge=0)  # 课表/成绩结果缓存
+    edu_refresh_cooldown_s: int = Field(default=60, ge=0)  # 同一用户两次真实拉取的最小间隔
+    edu_terms_lookback: int = Field(default=4, ge=1, le=8)  # 成绩聚合往回查几个学期
 
     # 限流与队列（单 worker 内存实现）
     rate_limit_per_minute: int = Field(default=10, ge=1)
@@ -157,6 +162,11 @@ class Settings(BaseModel):
     @property
     def llm_chat_url(self) -> str:
         return f"{self.llm_base_url.rstrip('/')}/chat/completions"
+
+    @property
+    def edu_base_url(self) -> str:
+        scheme = "https" if self.edu_ssl else "http"
+        return f"{scheme}://{self.edu_host}:{self.edu_port}{self.edu_base_path}"
 
     @classmethod
     def from_env(

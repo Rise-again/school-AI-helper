@@ -228,6 +228,9 @@ class ChatService:
 
     @staticmethod
     def _fixed_reply(*, role: str, state: dict[str, Any]) -> str | None:
+        # 教务数据类问题：节点已用真实数据拼好文案，直接返回，不经过生成模型
+        if direct := state.get("direct_reply"):
+            return str(direct)
         degraded = state.get("degraded", "")
         intent = state.get("intent", "")
         if degraded == "edu_pending":

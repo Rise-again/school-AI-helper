@@ -65,6 +65,7 @@ class AgentDeps:
         search_daily_quota: int = 1800,
         search_user_daily_quota: int = 60,
         kb_titles_provider: Callable[[], Awaitable[list[str]]] | None = None,
+        edu: Any | None = None,
     ) -> None:
         self.llm = llm
         self.retriever = retriever
@@ -74,6 +75,7 @@ class AgentDeps:
         self.search_daily_quota = search_daily_quota
         self.search_user_daily_quota = search_user_daily_quota
         self.kb_titles_provider = kb_titles_provider
+        self.edu = edu
 
 
 async def route_query(
@@ -307,12 +309,56 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
         }
 
     async def edu_node(state: AgentState) -> dict:
-        # P5 未接入前，统一走占位降级，避免 P3 被外部依赖卡住
-        return {
-            "evidence": [],
-            "citations": [],
-            "degraded": "edu_pending",
-            "trace": _trace(state, "edu_query", status="degraded"),
-        }
+        """教务数据类问题：取真实数据后用模板直出，不经过生成模型。"""
+        if deps.edu is None:
+            return {
+                "evidence": [],
+                "citations": [],
+                "degraded": "edu_pending",
+                "trace": _trace(state, "edu_query", status="degraded"),
+            }
+
+        role = state.get("role", "guest")
+        from app.agents.state import GUEST_EDU_REPLY
+
+        if role == "guest":
+            return {
+                "direct_reply": GUEST_EDU_REPLY,
+                "trace": _trace(state, "edu_query", status="denied", role=role),
+            }
+        if role != "student":
+            return {
+                "direct_reply": "教务数据只对学生本人开放，管理员看不到学生的成绩明细。",
+                "trace": _trace(state, "edu_query", status="denied", role=role),
+            }
+
+        identity = str(state.get("identity") or "")
+        if not identity.startswith("user:"):
+            return {
+                "direct_reply": GUEST_EDU_REPLY,
+                "trace": _trace(state, "edu_query", status="denied", identity=identity),
+            }
+        user_id = int(identity.split(":", 1)[1])
+
+        from app.core.errors import AppError
+        from app.services.edu_service import EduNotBound
+
+        try:
+            text = await deps.edu.chat_answer(user_id, str(state.get("query") or ""))
+            return {
+                "direct_reply": text,
+                "trace": _trace(state, "edu_query", status="ok"),
+            }
+        except EduNotBound:
+            return {
+                "direct_reply": "你还没有绑定教务账号。到「教务查询」页填学号和教务密码绑定后，我就能查你的课表、成绩和学分。",
+                "trace": _trace(state, "edu_query", status="unbound"),
+            }
+        except AppError as exc:
+            return {
+                "direct_reply": exc.message,
+                "degraded": "edu_unavailable",
+                "trace": _trace(state, "edu_query", status="degraded", error=exc.code),
+            }
 
     return {"classify": classify, "retrieve": retrieve, "edu": edu_node}

@@ -68,6 +68,31 @@ def split_sentences(text: str) -> list[str]:
     return [p for p in parts if p.strip()]
 
 
+_CITE_RE = re.compile(r"(?:\[\d+\])+")
+
+
+def clamp_citations(answer: str, evidence: list[dict], max_per_sentence: int = 2) -> str:
+    """每句最多保留 max_per_sentence 个编号，按证据重排分优先保留。
+
+    微调版学会了"多挂编号更安全"，会出现一句挂 5 条的情况，引用正确率反而下降；
+    这里做确定性收敛：同一句里按证据分数取前 N 个，其余去掉；编号顺序保持升序。
+    "参考："行不动（那是汇总行，不是事实句）。
+    """
+    if not answer or not evidence:
+        return answer
+    scores = {idx + 1: float(e.get("score") or 0.0) for idx, e in enumerate(evidence)}
+
+    def repl(match: re.Match[str]) -> str:
+        nums = [int(x) for x in re.findall(r"\d+", match.group(0))]
+        if len(set(nums)) <= max_per_sentence:
+            return "".join(f"[{n}]" for n in sorted(set(nums)))
+        kept = sorted(set(nums), key=lambda n: (-scores.get(n, 0.0), n))[:max_per_sentence]
+        return "".join(f"[{n}]" for n in sorted(kept))
+
+    sentences = split_sentences(answer)
+    return "".join(s if "参考：" in s else _CITE_RE.sub(repl, s) for s in sentences)
+
+
 def audit_answer(answer: str, evidence: list[dict]) -> list[Violation]:
     """返回回答里找不到资料依据的具体片段。空列表表示通过。"""
     if not answer or not evidence:

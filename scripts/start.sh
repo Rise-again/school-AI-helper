@@ -24,6 +24,9 @@ APP_PORT="${APP_PORT:-8080}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.75}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-6144}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-8}"
+MAX_LORA_RANK="${MAX_LORA_RANK:-16}"
+# LoRA adapter 目录存在就顺带挂载（P4 微调产物），不存在则只跑基座
+LORA_DIR="${LORA_DIR:-$DATA_ROOT/data/sft/output}"
 
 running() {  # $1 = pidfile
   local pidfile="$RUN_DIR/$1.pid"
@@ -46,13 +49,20 @@ wait_http() {  # $1 = url, $2 = 描述, $3 = 超时秒
 start_vllm() {
   if running vllm; then echo "  · vLLM 已在运行"; return 0; fi
   echo "  → 启动 vLLM（首次加载 1–3 分钟）"
-  setsid nohup "$VENV_DIR/vllm/bin/vllm" serve "$MODEL_DIR/qwen2.5-7b-instruct" \
-    --served-model-name qwen2.5-7b-instruct \
-    --host 127.0.0.1 --port "$LLM_PORT" \
-    --gpu-memory-utilization "$GPU_MEM_UTIL" \
-    --max-model-len "$MAX_MODEL_LEN" \
-    --max-num-seqs "$MAX_NUM_SEQS" \
-    --enforce-eager \
+  local -a vllm_args=(
+    serve "$MODEL_DIR/qwen2.5-7b-instruct"
+    --served-model-name qwen2.5-7b-instruct
+    --host 127.0.0.1 --port "$LLM_PORT"
+    --gpu-memory-utilization "$GPU_MEM_UTIL"
+    --max-model-len "$MAX_MODEL_LEN"
+    --max-num-seqs "$MAX_NUM_SEQS"
+    --enforce-eager
+  )
+  if [ -d "$LORA_DIR" ]; then
+    echo "  → 挂载 LoRA：campus-lora=$LORA_DIR"
+    vllm_args+=(--enable-lora --max-lora-rank "$MAX_LORA_RANK" --lora-modules "campus-lora=$LORA_DIR")
+  fi
+  setsid nohup "$VENV_DIR/vllm/bin/vllm" "${vllm_args[@]}" \
     > "$LOG_DIR/vllm.log" 2>&1 < /dev/null &
   echo $! > "$RUN_DIR/vllm.pid"
   wait_http "http://127.0.0.1:$LLM_PORT/v1/models" "vLLM" 180

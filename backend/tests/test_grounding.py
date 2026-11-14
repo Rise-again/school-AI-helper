@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from app.services.grounding import audit_answer, drop_violations, split_sentences
+from app.services.grounding import audit_answer, clamp_citations, drop_violations, split_sentences
 
 EVIDENCE = [
     {
@@ -122,3 +122,18 @@ def test_title_split_by_page_header_is_accepted():
     ]
     answer = "须填写《海南热带海洋学院学生勤工助学申请表》 [1]。"
     assert audit_answer(answer, evidence) == []
+
+
+def test_clamp_citations_keeps_top_scored():
+    evidence = [{"score": 0.9}, {"score": 0.5}, {"score": 0.1}]
+    out = clamp_citations("事实句一 [1][2][3]。参考：[1][2][3]", evidence)
+    assert out == "事实句一 [1][2]。参考：[1][2][3]"
+
+
+def test_clamp_citations_dedupes_and_keeps_two():
+    evidence = [{"score": 0.3}, {"score": 0.8}, {"score": 0.6}]
+    out = clamp_citations("甲 [2][2][3][1]。", evidence)
+    assert out == "甲 [2][3]。"
+    # 不超过上限时只去重，不改顺序
+    assert clamp_citations("乙 [1]。", evidence) == "乙 [1]。"
+    assert clamp_citations("丙 [1][2][3]。", []) == "丙 [1][2][3]。"

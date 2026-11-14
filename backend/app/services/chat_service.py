@@ -35,7 +35,12 @@ from app.core.rate_limit import SlidingWindowLimiter
 from app.integrations.llm_client import LLMClient
 from app.rag.tokens import estimate_tokens
 from app.repositories.conversations import ConversationRepository
-from app.services.grounding import audit_answer, drop_violations, violation_brief
+from app.services.grounding import (
+    audit_answer,
+    clamp_citations,
+    drop_violations,
+    violation_brief,
+)
 
 logger = logging.getLogger("campus.chat")
 
@@ -311,6 +316,8 @@ class ChatService:
         # 落地校验：回答里不能出现资料中没有的具体内容
         evidence = state.get("evidence") or []
         audited = _strip_marks_if_not_found(await self._ground(answer, evidence))
+        # 编号收敛：每句最多 2 个，按证据分数保留最直接的引用
+        audited = clamp_citations(audited, evidence)
         if audited != answer:
             logger.info(
                 "answer_grounded",

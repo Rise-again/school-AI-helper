@@ -364,3 +364,11 @@
 - 新增 `tests/test_edu_api.py` 5 条：走完整 HTTP 链路（Fake 上游），覆盖绑定→课表/成绩/学分→解绑的契约、未绑定 400、上游 503、管理员 403、两个学生数据隔离、全项目只有 `integrations/edu` import school-sdk。全量 **139 通过 5 跳过**。
 - 生产实测（公网）：未登录 401；学生未绑定查课表 400/1001；绑定在教务不可达时 **5.5 秒**返回 503/6001（SDK 本身不带 timeout，适配层加了 5 秒 TCP 预检 + 外层硬超时，否则会卡系统级 connect 两分钟）；失败后 status 仍 `bound=false`、不落库；管理员 403/2002；对话问"我的课表"走 `intent=edu` 模板直出，46 字、425ms、不调模型。
 - 验收报告：`docs/13-P5-验收报告.md`。P5-01/02/04/05/06 通过，P5-03 的"抽样 10 条与教务一致"与真实会话失效重登待教务恢复外网访问后按清单补测；代码侧无需再改。
+
+**P4 微调：数据、训练、对比与上线（2026-11-14）**
+- 数据：`scripts/build_sft_full.py` 从 45 个制度切片生成问题 → 用线上提示词作答 → `audit_answer` + 标注覆盖率双重过滤 → 三角色变体 + 拒答模板 + 16 条种子；产出 540 条（485/55）。丢弃最多的是标注不足（184）与审计不通过（57）；与评测集做 3-gram 去重。
+- 训练：Llama-Factory 0.9.3 + QLoRA r16/alpha32，cutoff 3072，batch 1×8，lr 1e-4 cosine，3 epoch，paged_adamw_8bit；183 步、12 分 32 秒，train_loss 0.169，eval_loss 0.2304→0.1908（100 步最优）。
+- 踩坑：首次训练在 step 50 的 eval OOM（eval 默认 batch=8 × 3072 × 15 万词表 logits 要 5GB），且 OOM 前未存盘。改 eval batch=1 + `expandable_segments` 后重跑；教训写进训练日志。
+- 对比（60 题、同一证据/提示词）：违规 18→8、有违规回答 12→6、标注覆盖率 0.49→0.89、库外拒答 0→0.10、可答误拒 0→0、长度 174→155、非流式 2.67s→4.44s；流式首字不变（0.14–0.19s），生成速度约慢一倍。用户查看 12 条对照后选择上线微调。
+- 上线：vLLM 以 `--enable-lora --lora-modules campus-lora=.../output` 启动，后端 `LLM_MODEL=campus-lora` 并重启；`model_version` 登记 `campus-lora-p4-v1`（eval_score 0.1908）。
+- 配套：新增编号收敛 `clamp_citations`（每句最多 2 个、按证据分保留，不改提示词版本）；`start.sh` 检测 adapter 目录后自动挂载；新增 2 条单测，全量 141 通过 5 跳过。

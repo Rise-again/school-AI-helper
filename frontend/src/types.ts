@@ -39,6 +39,7 @@ export interface Message {
   tokens?: number | null;
   latency_ms?: number | null;
   created_at: string;
+  citations?: Citation[];
 }
 
 export interface Citation {

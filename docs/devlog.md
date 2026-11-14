@@ -306,3 +306,13 @@
 - 修复：`scripts/start.sh` 增加 `ensure_mysql()`，启动后端前先探测 3306，没起来就 `service mysql start` 并等 30 秒。实测 stop 掉 MySQL 后跑一次即自动恢复。
 - 自检结果：数据完好（21 份文件 / 305 切片 / 323 会话 / 702 消息 / 646 引用 / 21 份上传 / chroma 5.2M / 模型 18G）；三个服务起来后 `/readyz` 全绿，公网 `http://i-2.gpushare.com:44368/healthz` 200。
 - 冷启动注意：重启后第一条问答 15.2s（vLLM 预热），第二条 2.14s。显存 21.0/24.5G。
+
+**P6 收尾一：引用回显、重试、骨架屏、403、Markdown 渲染（2026-11-14）**
+- 引用回显：`GET /conversations/{id}/messages` 现在批量带出 citations（一页一条 SQL，`list_citations_bulk`），前端切回历史会话仍能看到引用卡片并"查看原文"。此前 citation 只写不读，刷新就全丢。
+- 重试：失败气泡上给"重试"，删掉这对失败的问答后用原问题重发；`send()` 拆出 `submit(text)` 复用。
+- 骨架屏：对话消息区、历史列表、知识库列表首屏改为 `el-skeleton`（原先是 `v-loading` 或空白）。
+- 403：新增 `/403` 页，越权访问改为落到 403 并给"返回首页/上一页"，不再静默跳回首页；守卫里加了防循环判断。
+- Markdown：新增 `markdown-it` + `dompurify`（经用户批准，是全项目唯一超出选题技术栈的前端库）。`html:false` + DOMPurify 双层防注入，外链统一 `target=_blank rel=noopener`。流式期间仍显示纯文本、结束后才渲染，避免逐 token 重排。
+- 环境变量：新增 `.env.development` / `.env.production` / `.env.example` 与 `VITE_API_BASE`（默认同源，前端独立部署时改地址即可）；已补进计划 P6-01。
+- 体积与性能：vendor 32KB→85KB gzip，产物合计约 460KB（门禁 1.5MB）。后端未改动链路，实测首字 1.05–1.20s、总 1.41–3.97s；Markdown 单次渲染 0.36ms（184 字含列表+表格），对"收到回复"的感知延迟无影响。
+- 待用户验收：浏览器里看 Markdown 排版、重试按钮、403 页；375/768/1440 三档宽度仍需人工确认。

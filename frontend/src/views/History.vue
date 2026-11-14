@@ -48,7 +48,9 @@ onMounted(load);
     <h2 class="page-title">历史记录</h2>
     <p class="page-desc">所有会话按更新时间倒序，删除会话会级联清理消息与引用。</p>
 
-    <el-table v-loading="loading" :data="rows" class="card" stripe>
+    <el-skeleton v-if="loading && !rows.length" :rows="5" animated class="card" />
+
+    <el-table v-else v-loading="loading" :data="rows" class="card" stripe>
       <el-table-column prop="title" label="标题" min-width="200" />
       <el-table-column prop="role_mode" label="角色" width="100">
         <template #default="{ row }">

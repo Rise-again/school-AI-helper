@@ -46,6 +46,12 @@ const routes: RouteRecordRaw[] = [
     ],
   },
   {
+    path: "/403",
+    name: "forbidden",
+    component: () => import("@/views/Forbidden.vue"),
+    meta: { title: "没有访问权限", roles: ["student", "admin"] },
+  },
+  {
     path: "/:pathMatch(.*)*",
     name: "not-found",
     component: () => import("@/views/NotFound.vue"),
@@ -72,10 +78,11 @@ router.beforeEach(async (to) => {
     return { name: "login", query: { redirect: to.fullPath } };
   }
 
-  // 角色越权：直接拦回首页，而不是让后端返回 403
+  // 角色越权：给 403 页面，而不是静默弹回首页
   const roles = (to.meta.roles as string[] | undefined) ?? [];
   if (roles.length && auth.role && !roles.includes(auth.role)) {
-    return { name: auth.isAdmin ? "knowledge" : "chat" };
+    if (to.name === "forbidden") return true; // 防止循环重定向
+    return { name: "forbidden" };
   }
   return true;
 });

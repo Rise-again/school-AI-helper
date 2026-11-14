@@ -46,4 +46,8 @@ class ConversationService:
     async def messages(self, *, user_id: int, conversation_id: int, page: int, size: int) -> dict[str, Any]:
         await self.get(user_id=user_id, conversation_id=conversation_id)  # 校验归属
         items, total = await self._repo.list_messages(conversation_id=conversation_id, page=page, size=size)
+        # 引用随消息一并返回，否则刷新页面后"查看原文"全部丢失
+        by_message = await self._repo.list_citations_bulk([int(m["id"]) for m in items])
+        for item in items:
+            item["citations"] = by_message.get(int(item["id"]), [])
         return {"items": items, "total": total, "page": page, "size": size}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,6 +59,8 @@ class MessageOut(BaseModel):
     tokens: int | None = None
     latency_ms: int | None = None
     created_at: datetime
+    # 引用随消息返回（历史会话刷新后仍能显示"查看原文"）
+    citations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PageMeta(BaseModel):

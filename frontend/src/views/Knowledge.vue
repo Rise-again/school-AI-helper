@@ -151,7 +151,9 @@ onBeforeUnmount(() => {
       <el-button @click="load">刷新</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="rows" stripe>
+    <el-skeleton v-if="loading && !rows.length" :rows="5" animated />
+
+    <el-table v-else v-loading="loading" :data="rows" stripe>
       <el-table-column prop="filename" label="文件" min-width="220" show-overflow-tooltip />
       <el-table-column prop="file_type" label="类型" width="80" />
       <el-table-column label="大小" width="100">

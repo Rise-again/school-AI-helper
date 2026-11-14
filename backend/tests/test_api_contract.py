@@ -91,3 +91,22 @@ def test_kb_download_requires_auth(client):
 def test_kb_download_route_registered(client):
     paths = client.get("/openapi.json").json()["paths"]
     assert "/api/v1/kb/files/{file_id}/download" in paths
+
+
+def test_message_out_carries_citations():
+    """历史会话回显：消息响应必须带 citations 字段（默认空数组）。"""
+    from datetime import datetime
+
+    from app.schemas.common import MessageOut
+
+    plain = MessageOut(id=1, role="user", content="你好", created_at=datetime.now())
+    assert plain.citations == []
+
+    with_cite = MessageOut(
+        id=2,
+        role="assistant",
+        content="报酬不低于400元/月 [1]",
+        created_at=datetime.now(),
+        citations=[{"kb_file_id": 18, "page_no": 3, "snippet": "400元/月", "score": 0.99}],
+    )
+    assert with_cite.citations[0]["kb_file_id"] == 18

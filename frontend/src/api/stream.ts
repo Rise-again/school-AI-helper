@@ -1,4 +1,5 @@
 import type { Citation, StreamEvent, StreamMeta } from "@/types";
+import { API_BASE } from "./http";
 
 /**
  * 流式对话。用 fetch 而不是 axios：需要逐块读取 ReadableStream。
@@ -21,7 +22,7 @@ export function streamChat(
 
   (async () => {
     try {
-      const resp = await fetch(`/api/v1${path}`, {
+      const resp = await fetch(`${API_BASE}${path}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

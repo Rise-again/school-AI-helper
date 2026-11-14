@@ -136,3 +136,22 @@ class ConversationRepository:
                 (message_id,),
             )
             return list(await cur.fetchall())
+
+    async def list_citations_bulk(self, message_ids: list[int]) -> dict[int, list[dict[str, Any]]]:
+        """一次取出一页消息的引用，避免每条消息一次查询（历史会话回显用）。"""
+        if not message_ids:
+            return {}
+        placeholders = ", ".join(["%s"] * len(message_ids))
+        sql = (
+            "SELECT message_id, kb_file_id, chunk_id, page_no, url, snippet, score "
+            f"FROM citation WHERE message_id IN ({placeholders}) ORDER BY id ASC"
+        )
+        async with self._db.cursor() as cur:
+            await cur.execute(sql, tuple(message_ids))
+            rows = await cur.fetchall()
+        grouped: dict[int, list[dict[str, Any]]] = {}
+        for row in rows:
+            grouped.setdefault(int(row["message_id"]), []).append(
+                {k: v for k, v in row.items() if k != "message_id"}
+            )
+        return grouped

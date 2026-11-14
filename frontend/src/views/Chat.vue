@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
-import { Plus, Promotion, VideoPause, Link } from "@element-plus/icons-vue";
+import { Plus, Promotion, VideoPause, Link, RefreshRight } from "@element-plus/icons-vue";
+import MarkdownIt from "markdown-it";
+import DOMPurify from "dompurify";
 import { createConversation, downloadKbFile, listConversations, listMessages } from "@/api";
 import { streamChat } from "@/api/stream";
 import type { Citation, Conversation } from "@/types";
@@ -12,7 +14,21 @@ interface ChatMessage {
   content: string;
   citations?: Citation[];
   streaming?: boolean;
+  failed?: boolean;
   meta?: { intent: string; degraded: string; evidence: number };
+}
+
+// 回答里可能有列表和表格，按 Markdown 渲染；html:false + DOMPurify 双层防注入
+const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
+const defaultLinkOpen = md.renderer.rules.link_open ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  tokens[idx].attrSet("target", "_blank");
+  tokens[idx].attrSet("rel", "noopener noreferrer");
+  return defaultLinkOpen(tokens, idx, options, env, self);
+};
+
+function renderMd(text: string): string {
+  return DOMPurify.sanitize(md.render(text || ""));
 }
 
 const conversations = ref<Conversation[]>([]);
@@ -21,6 +37,7 @@ const messages = ref<ChatMessage[]>([]);
 const input = ref("");
 const sending = ref(false);
 const loadingConv = ref(false);
+const loadingMessages = ref(false);
 const scroller = ref<HTMLElement | null>(null);
 let currentStream: { abort: () => void } | null = null;
 
@@ -39,10 +56,20 @@ async function loadConversations() {
 async function selectConversation(id: number) {
   if (sending.value) return;
   activeId.value = id;
-  const page = await listMessages(id);
-  messages.value = page.items
-    .filter((m) => m.role !== "system")
-    .map((m) => ({ id: String(m.id), role: m.role as "user" | "assistant", content: m.content }));
+  loadingMessages.value = true;
+  try {
+    const page = await listMessages(id);
+    messages.value = page.items
+      .filter((m) => m.role !== "system")
+      .map((m) => ({
+        id: String(m.id),
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        citations: m.citations?.length ? m.citations : undefined,
+      }));
+  } finally {
+    loadingMessages.value = false;
+  }
   scrollToBottom();
 }
 
@@ -63,6 +90,12 @@ function scrollToBottom() {
 async function send() {
   const text = input.value.trim();
   if (!text || sending.value) return;
+  input.value = "";
+  await submit(text);
+}
+
+async function submit(text: string) {
+  if (!text || sending.value) return;
 
   if (!activeId.value) {
     const conv = await createConversation(text.slice(0, 20));
@@ -78,7 +111,6 @@ async function send() {
     streaming: true,
   };
   messages.value.push(userMsg, reply);
-  input.value = "";
   sending.value = true;
   scrollToBottom();
 
@@ -111,6 +143,7 @@ async function send() {
       },
       onError: (msg) => {
         reply.streaming = false;
+        reply.failed = true;
         reply.content = reply.content || `出错了：${msg}`;
         sending.value = false;
         currentStream = null;
@@ -119,6 +152,16 @@ async function send() {
     },
     { token },
   );
+}
+
+/** 重试：删掉失败的问答对，用原问题再发一次 */
+function retry(failed: ChatMessage) {
+  const idx = messages.value.findIndex((m) => m.id === failed.id);
+  if (idx < 0) return;
+  const userMsg = [...messages.value.slice(0, idx)].reverse().find((m) => m.role === "user");
+  if (!userMsg) return;
+  messages.value = messages.value.filter((m) => m.id !== failed.id && m.id !== userMsg.id);
+  submit(userMsg.content);
 }
 
 function stop() {
@@ -180,15 +223,24 @@ onMounted(loadConversations);
       <div class="main-head">{{ activeTitle }}</div>
 
       <div ref="scroller" class="messages">
+        <div v-if="loadingMessages" class="skeleton">
+          <el-skeleton :rows="6" animated />
+        </div>
+
         <el-empty
-          v-if="!messages.length"
+          v-else-if="!messages.length"
           description="问点什么吧，比如「考试作弊怎么处理」"
           :image-size="80"
         />
 
         <div v-for="m in messages" :key="m.id" class="msg" :class="m.role">
           <div class="bubble">
-            <div class="content">{{ m.content }}<span v-if="m.streaming" class="cursor">▋</span></div>
+            <div v-if="m.role === 'assistant' && !m.streaming" class="content md" v-html="renderMd(m.content)"></div>
+            <div v-else class="content">{{ m.content }}<span v-if="m.streaming" class="cursor">▋</span></div>
+
+            <div v-if="m.failed" class="retry">
+              <el-button link type="primary" :icon="RefreshRight" @click="retry(m)">重试</el-button>
+            </div>
 
             <div v-if="m.citations?.length" class="cites">
               <div v-for="(c, i) in m.citations" :key="i" class="cite">
@@ -324,6 +376,61 @@ onMounted(loadConversations);
 .content {
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Markdown 渲染后的排版：只作用于助手回答，用户气泡仍是纯文本 */
+.md {
+  white-space: normal;
+}
+.md :deep(p) {
+  margin: 0 0 8px;
+}
+.md :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.md :deep(ul),
+.md :deep(ol) {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+.md :deep(li) {
+  margin: 2px 0;
+}
+.md :deep(table) {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.md :deep(th),
+.md :deep(td) {
+  border: 1px solid #e5e7eb;
+  padding: 4px 10px;
+  text-align: left;
+}
+.md :deep(th) {
+  background: #f8fafc;
+}
+.md :deep(code) {
+  background: #f3f4f6;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.md :deep(pre) {
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  padding: 10px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.md :deep(a) {
+  color: #2563eb;
+}
+.skeleton {
+  padding: 6px 2px;
+}
+.retry {
+  margin-top: 6px;
 }
 .cursor {
   animation: blink 1s step-end infinite;

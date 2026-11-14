@@ -2,8 +2,14 @@ import axios from "axios";
 import { ElMessage } from "element-plus";
 import type { Envelope } from "@/types";
 
+/**
+ * 后端地址：默认同源 /api/v1（开发走 vite proxy，生产由 FastAPI 托管）。
+ * 前端单独部署到别的域名时，用 VITE_API_BASE 指定，不用改代码。
+ */
+export const API_BASE = `${(import.meta.env.VITE_API_BASE || "").replace(/\/$/, "")}/api/v1`;
+
 const http = axios.create({
-  baseURL: "/api/v1",
+  baseURL: API_BASE,
   timeout: 20000,
 });
 
@@ -53,7 +59,7 @@ http.interceptors.response.use(
       if (refreshToken && !error.config.__retried) {
         refreshing ??= axios
           .post<Envelope<{ access_token: string; refresh_token: string }>>(
-            "/api/v1/auth/refresh",
+            `${API_BASE}/auth/refresh`,
             { refresh_token: refreshToken },
           )
           .then((r) => {

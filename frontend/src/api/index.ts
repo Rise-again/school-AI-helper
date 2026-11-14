@@ -1,11 +1,15 @@
 import http from "./http";
 import type {
   Conversation,
+  CreditSummary,
+  EduStatus,
   Envelope,
+  GradeResult,
   KbChunk,
   KbFile,
   Message,
   Page,
+  ScheduleSlot,
   TokenPair,
   UserProfile,
 } from "@/types";
@@ -87,4 +91,39 @@ export async function deleteKbFile(fileId: number) {
 export async function downloadKbFile(fileId: number) {
   const resp = await http.get(`/kb/files/${fileId}/download`, { responseType: "blob" });
   return resp.data as Blob;
+}
+
+// ---------- 教务（P5 未接入前会返回 404，页面据此显示"未接入"） ----------
+export async function getEduStatus() {
+  const { data } = await http.get<Envelope<EduStatus>>("/edu/status", { silent: true } as never);
+  return data.data;
+}
+
+export async function bindEdu(payload: { student_no: string; password: string }) {
+  const { data } = await http.post<Envelope<EduStatus>>("/edu/bind", payload);
+  return data.data;
+}
+
+export async function unbindEdu() {
+  await http.delete("/edu/bind");
+}
+
+export async function getEduSchedule() {
+  const { data } = await http.get<Envelope<{ items: ScheduleSlot[] }>>("/edu/schedule", {
+    silent: true,
+  } as never);
+  return data.data.items;
+}
+
+export async function getEduGrades(term?: string) {
+  const { data } = await http.get<Envelope<GradeResult>>("/edu/grades", {
+    params: term ? { term } : undefined,
+    silent: true,
+  } as never);
+  return data.data;
+}
+
+export async function getEduCredits() {
+  const { data } = await http.get<Envelope<CreditSummary>>("/edu/credits", { silent: true } as never);
+  return data.data;
 }

@@ -86,8 +86,13 @@ http.interceptors.response.use(
     }
 
     const message = resp?.data?.message || (status ? `请求失败（${status}）` : "网络异常");
-    ElMessage.error(message);
-    return Promise.reject(new Error(message));
+    // silent：探测类请求（如教务是否已接入）不弹全局错误，由页面自己处理
+    if (!(error.config as { silent?: boolean } | undefined)?.silent) {
+      ElMessage.error(message);
+    }
+    const wrapped = new Error(message) as Error & { status?: number };
+    wrapped.status = status;
+    return Promise.reject(wrapped);
   },
 );
 

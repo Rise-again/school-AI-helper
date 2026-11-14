@@ -53,6 +53,17 @@ async def get_conversation(
     return envelope(0, "ok", ConversationOut(**conv).model_dump())
 
 
+@router.get("/{conversation_id}/trace", summary="Agent 决策轨迹（复盘用）")
+async def get_trace(
+    conversation_id: int = Path(ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    user: CurrentUser = Depends(_student_or_admin),
+    svc: ConversationService = Depends(get_conversation_service),
+) -> dict:
+    items = await svc.traces(user_id=user.id, conversation_id=conversation_id, limit=limit)
+    return envelope(0, "ok", {"items": items})
+
+
 @router.patch("/{conversation_id}", summary="重命名")
 async def rename_conversation(
     payload: ConversationRename,

@@ -216,7 +216,7 @@ class ChatService:
         # 固定回复路径：不调模型，直接落库并返回
         fixed = self._fixed_reply(role=role, state=state)
         if fixed is not None:
-            async for event in self._finish(conversation_id, fixed, [], started, emit_text=True):
+            async for event in self._finish(conversation_id, fixed, [], started, emit_text=True, state=state):
                 yield event
             return
 
@@ -285,6 +285,7 @@ class ChatService:
                             partial,
                             self._used_citations(partial, state.get("citations") or []),
                             latency_ms,
+                            state,
                         )
                     )
                 logger.info(
@@ -298,7 +299,7 @@ class ChatService:
         answer = "".join(parts).strip()
         if failed and not answer:
             # 一个字都没生成就挂了：给降级话术，而不是 error 事件
-            async for event in self._finish(conversation_id, MODEL_DOWN_REPLY, [], started, emit_text=True):
+            async for event in self._finish(conversation_id, MODEL_DOWN_REPLY, [], started, emit_text=True, state=state):
                 yield event
             return
         if not answer:
@@ -318,7 +319,7 @@ class ChatService:
         all_citations = state.get("citations") or []
         citations = self._used_citations(answer, all_citations)
 
-        async for event in self._finish(conversation_id, answer, citations, started, emit_text=False):
+        async for event in self._finish(conversation_id, answer, citations, started, emit_text=False, state=state):
             yield event
 
     async def _ground(self, answer: str, evidence: list[dict]) -> str:
@@ -392,13 +393,14 @@ class ChatService:
         started: float,
         *,
         emit_text: bool,
+        state: dict[str, Any] | None = None,
     ) -> AsyncIterator[tuple[str, dict]]:
         latency_ms = int((time.perf_counter() - started) * 1000)
 
         if conversation_id is not None:
             # 客户端断线时生成器会被取消，用 shield 保证写入完成
             with contextlib.suppress(Exception):
-                await asyncio.shield(self._persist(conversation_id, answer, citations, latency_ms))
+                await asyncio.shield(self._persist(conversation_id, answer, citations, latency_ms, state))
 
         if citations:
             yield "citation", {"items": citations}
@@ -407,7 +409,12 @@ class ChatService:
         yield "done", {"latency_ms": latency_ms, "chars": len(answer)}
 
     async def _persist(
-        self, conversation_id: int, answer: str, citations: list[dict], latency_ms: int
+        self,
+        conversation_id: int,
+        answer: str,
+        citations: list[dict],
+        latency_ms: int,
+        state: dict[str, Any] | None = None,
     ) -> None:
         message_id = await self._repo.add_message(
             conversation_id=conversation_id,
@@ -418,6 +425,21 @@ class ChatService:
         )
         if citations:
             await self._repo.add_citations(message_id=message_id, items=citations)
+        if state is not None:
+            # 轨迹写失败不影响回答；复盘数据是辅助能力
+            with contextlib.suppress(Exception):
+                await self._repo.add_trace(
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    trace_id=trace_id_var.get(),
+                    intent=state.get("intent"),
+                    keywords=state.get("keywords"),
+                    degraded=state.get("degraded"),
+                    evidence_count=len(state.get("evidence") or []),
+                    prompt_version=PROMPT_VERSION,
+                    nodes=state.get("trace") or [],
+                    latency_ms=latency_ms,
+                )
         await self._repo.touch(conversation_id)
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.db.pool import Database
@@ -135,6 +136,59 @@ class ConversationRepository:
         ]
         async with self._db.cursor() as cur:
             await cur.executemany(sql, args)
+
+    # ---------- Agent 轨迹 ----------
+    async def add_trace(
+        self,
+        *,
+        conversation_id: int,
+        message_id: int | None,
+        trace_id: str | None,
+        intent: str | None,
+        keywords: str | None,
+        degraded: str | None,
+        evidence_count: int,
+        prompt_version: str | None,
+        nodes: list[dict[str, Any]],
+        latency_ms: int | None,
+    ) -> None:
+        """一条消息一行，约 1–3 KB；不占显存、不影响推理耗时。"""
+        async with self._db.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO agent_trace (conversation_id, message_id, trace_id, intent, keywords, "
+                "degraded, evidence_count, prompt_version, nodes, latency_ms) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    conversation_id,
+                    message_id,
+                    trace_id,
+                    intent,
+                    (keywords or "")[:128] or None,
+                    degraded or None,
+                    evidence_count,
+                    prompt_version,
+                    json.dumps(nodes or [], ensure_ascii=False),
+                    latency_ms,
+                ),
+            )
+
+    async def list_traces(self, *, conversation_id: int, limit: int = 50) -> list[dict[str, Any]]:
+        async with self._db.cursor() as cur:
+            await cur.execute(
+                "SELECT id, message_id, trace_id, intent, keywords, degraded, evidence_count, "
+                "prompt_version, nodes, latency_ms, created_at FROM agent_trace "
+                "WHERE conversation_id = %s ORDER BY id ASC LIMIT %s",
+                (conversation_id, limit),
+            )
+            rows = await cur.fetchall()
+        for row in rows:
+            nodes = row.get("nodes")
+            if isinstance(nodes, (str, bytes)):
+                try:
+                    row["nodes"] = json.loads(nodes)
+                except (ValueError, TypeError):
+                    row["nodes"] = []
+        return list(rows)
 
     async def list_citations(self, *, message_id: int) -> list[dict[str, Any]]:
         async with self._db.cursor() as cur:

@@ -194,3 +194,50 @@ def test_not_found_answer_loses_markers():
     assert _strip_marks_if_not_found(text) == "资料中没有直接说明这一点。"
     normal = "报酬不低于400元/月 [1]。\n参考：[1]"
     assert _strip_marks_if_not_found(normal) == normal
+
+
+# ---------- 轨迹落库 ----------
+class FakeTraceRepo:
+    def __init__(self):
+        self.traces = []
+        self.messages = []
+
+    async def add_message(self, **kw):
+        self.messages.append(kw)
+        return 7
+
+    async def add_citations(self, **kw):
+        pass
+
+    async def touch(self, conversation_id):
+        pass
+
+    async def add_trace(self, **kw):
+        self.traces.append(kw)
+
+
+def test_persist_writes_agent_trace():
+    import asyncio
+
+    repo = FakeTraceRepo()
+    svc = ChatService(
+        graph=SimpleNamespace(),
+        llm=SimpleNamespace(),
+        conversations=repo,
+        settings=SimpleNamespace(rate_limit_per_minute=10),
+        guest_limiter=SlidingWindowLimiter(limit=10),
+    )
+    state = {
+        "intent": "kb",
+        "keywords": "勤工助学 劳动报酬",
+        "degraded": "",
+        "evidence": [{"chunk_id": "c1"}, {"chunk_id": "c2"}],
+        "trace": [{"node": "classify", "intent": "kb"}, {"node": "retrieve", "kb": 3, "web": 0}],
+    }
+    asyncio.run(svc._persist(1, "报酬不低于400元/月 [1]。", [], 1200, state))
+    assert len(repo.traces) == 1
+    trace = repo.traces[0]
+    assert trace["intent"] == "kb"
+    assert trace["evidence_count"] == 2
+    assert trace["nodes"][1]["node"] == "retrieve"
+    assert trace["message_id"] == 7

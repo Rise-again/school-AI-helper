@@ -43,6 +43,10 @@ class ConversationService:
         if not ok:
             raise NotFound("会话不存在")
 
+    async def traces(self, *, user_id: int, conversation_id: int, limit: int = 50) -> list[dict[str, Any]]:
+        await self.get(user_id=user_id, conversation_id=conversation_id)  # 校验归属
+        return await self._repo.list_traces(conversation_id=conversation_id, limit=limit)
+
     async def messages(self, *, user_id: int, conversation_id: int, page: int, size: int) -> dict[str, Any]:
         await self.get(user_id=user_id, conversation_id=conversation_id)  # 校验归属
         items, total = await self._repo.list_messages(conversation_id=conversation_id, page=page, size=size)

@@ -107,3 +107,45 @@ export type StreamEvent =
   | { type: "citation"; data: { items: Citation[] } }
   | { type: "done"; data: StreamDone }
   | { type: "error"; data: { message: string } };
+
+// ---------- 教务（P5 后端接入后生效，前端先按契约实现） ----------
+export interface EduStatus {
+  bound: boolean;
+  student_no?: string | null;
+  updated_at?: string | null;
+}
+
+export interface ScheduleSlot {
+  weekday: number; // 1=周一 … 7=周日
+  sections: number[]; // 节次，如 [1,2]
+  course: string;
+  teacher?: string;
+  location?: string;
+  weeks?: string;
+}
+
+export interface GradeItem {
+  course: string;
+  credit: number;
+  score: string;
+  gpa?: number;
+  term: string;
+}
+
+export interface GradeResult {
+  terms: string[];
+  items: GradeItem[];
+}
+
+export interface CreditCategory {
+  name: string;
+  required: number;
+  earned: number;
+}
+
+export interface CreditSummary {
+  required: number;
+  earned: number;
+  gpa: number;
+  categories: CreditCategory[];
+}

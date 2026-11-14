@@ -72,7 +72,26 @@ start_models() {
   wait_http "http://127.0.0.1:$MODEL_PORT/healthz" "model-service" 60
 }
 
+ensure_mysql() {
+  # 实例重启后 MySQL 不会自己起来（平台没有完整 systemd），后端必须先等它
+  if (exec 3<>/dev/tcp/127.0.0.1/3306) 2>/dev/null; then exec 3>&-; return 0; fi
+  echo "  → 启动 MySQL"
+  service mysql start >/dev/null 2>&1 || true
+  local i=0
+  while [ "$i" -lt 30 ]; do
+    if (exec 3<>/dev/tcp/127.0.0.1/3306) 2>/dev/null; then
+      exec 3>&-
+      echo "  ✓ MySQL 就绪"
+      return 0
+    fi
+    i=$((i + 1)); sleep 1
+  done
+  echo "  ✗ MySQL 30 秒内没起来，看 /var/log/mysql/error.log" >&2
+  return 1
+}
+
 start_backend() {
+  ensure_mysql
   if running backend; then echo "  · 后端已在运行"; return 0; fi
   echo "  → 启动后端"
   cd "$REPO_ROOT/backend"

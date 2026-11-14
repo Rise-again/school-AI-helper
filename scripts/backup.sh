@@ -156,11 +156,11 @@ prune_local() {
   local pattern="$1" keep="$2"
   ls -1t $pattern 2>/dev/null | tail -n +$((keep + 1)) | xargs -r rm -f || true
 }
-prune_local "$BACKUP_DIR"/db-*.sql.gz 3
-prune_local "$BACKUP_DIR"/appdata-*.tar.gz 3
-prune_local "$BACKUP_DIR"/custom-*.tar.gz 3
-prune_local "$BACKUP_DIR"/venvs-*.tar.gz 2
-prune_local "$BACKUP_DIR"/models-*.tar.gz 1
+prune_local "$BACKUP_DIR/db-*.sql.gz" 3
+prune_local "$BACKUP_DIR/appdata-*.tar.gz" 3
+prune_local "$BACKUP_DIR/custom-*.tar.gz" 3
+prune_local "$BACKUP_DIR/venvs-*.tar.gz" 2
+prune_local "$BACKUP_DIR/models-*.tar.gz" 1
 
 if [ "$PRUNE" -eq 1 ]; then
   echo "清理远端旧备份（保留最近 5 份）..."

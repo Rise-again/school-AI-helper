@@ -377,3 +377,4 @@
 - 平台备份镜像由用户在控制台创建（只含系统盘，不含 `/hy-tmp`）。
 - OSS 备份失败：实例上 `oss` 登录态过期（401）；下次开机 `oss login` 后补 `bash scripts/backup.sh --full`。
 - 已做本地兜底：`D:\Desktop\CamScanner\campus-backup-2026-11-14-2356\`（147MB 代码+adapter+SFT 数据 bundle、150KB 数据库导出、README 恢复说明）。
+- 2026-11-15 00:01 用户重新 `oss login` 后补跑日常备份成功：`oss://campus/appdata-2026-11-15-0001.tar.gz`（816MB，含代码、`.env`、上传件、chroma、P4 adapter 与 SFT 数据）、`db-2026-11-15-0001.sql.gz`（150KB）。顺带修了 `backup.sh` 本地清理的通配符传参 bug（glob 展开导致 keep 参数错位）。

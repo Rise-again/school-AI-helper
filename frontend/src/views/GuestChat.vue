@@ -2,7 +2,21 @@
 import { nextTick, reactive, ref } from "vue";
 import { Link } from "@element-plus/icons-vue";
 import { streamChat } from "@/api/stream";
+import { renderMd } from "@/utils/markdown";
 import type { Citation } from "@/types";
+
+/** 引用出处展示：知识库用文件名，联网结果用域名，都没有就写"来源" */
+function sourceName(c: Citation): string {
+  if (c.filename) return c.filename;
+  if (c.url) {
+    try {
+      return new URL(c.url).hostname;
+    } catch {
+      return "官网";
+    }
+  }
+  return "来源";
+}
 
 interface Turn {
   role: "user" | "assistant";
@@ -73,11 +87,17 @@ function send() {
       <el-empty v-if="!turns.length" description="试试问：新生报到需要带什么材料？" :image-size="80" />
       <div v-for="(t, i) in turns" :key="i" class="msg" :class="t.role">
         <div class="bubble">
-          <div class="content">{{ t.content }}<span v-if="t.streaming" class="cursor">▋</span></div>
+          <div
+            v-if="t.role === 'assistant' && !t.streaming"
+            class="content md"
+            v-html="renderMd(t.content)"
+          ></div>
+          <div v-else class="content">{{ t.content }}<span v-if="t.streaming" class="cursor">▋</span></div>
           <div v-if="t.citations?.length" class="cites">
             <div v-for="(c, idx) in t.citations" :key="idx" class="cite">
               <el-icon><Link /></el-icon>
-              <span class="cite-text">[{{ idx + 1 }}] {{ c.snippet }}</span>
+              <span class="cite-file">{{ sourceName(c) }}</span>
+              <span class="cite-text">{{ c.snippet }}</span>
               <el-link v-if="c.url" :href="c.url" target="_blank" type="primary" :underline="false">原文</el-link>
             </div>
           </div>
@@ -184,6 +204,14 @@ h1 {
   gap: 6px;
   font-size: 12px;
   color: #6b7280;
+}
+.cite-file {
+  max-width: 38%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #374151;
+  font-weight: 500;
 }
 .cite-text {
   flex: 1;

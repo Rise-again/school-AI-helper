@@ -56,13 +56,21 @@ class ConversationRepository:
             return cur.rowcount > 0
 
     async def soft_delete(self, *, user_id: int, conversation_id: int) -> bool:
-        async with self._db.cursor() as cur:
+        """删除会话：会话行标记删除，消息与引用一并清掉（外键级联）。
+
+        验收要求"删除会话同步删消息与引用"；保留 conversation 行只为审计计数，
+        正文内容必须真删。
+        """
+        async with self._db.transaction() as cur:
             await cur.execute(
                 "UPDATE conversation SET deleted_at = NOW() "
                 "WHERE id = %s AND user_id = %s AND deleted_at IS NULL",
                 (conversation_id, user_id),
             )
-            return cur.rowcount > 0
+            if cur.rowcount == 0:
+                return False
+            await cur.execute("DELETE FROM message WHERE conversation_id = %s", (conversation_id,))
+            return True
 
     async def touch(self, conversation_id: int) -> None:
         async with self._db.cursor() as cur:
@@ -131,8 +139,10 @@ class ConversationRepository:
     async def list_citations(self, *, message_id: int) -> list[dict[str, Any]]:
         async with self._db.cursor() as cur:
             await cur.execute(
-                "SELECT kb_file_id, chunk_id, page_no, url, snippet, score "
-                "FROM citation WHERE message_id = %s ORDER BY id ASC",
+                "SELECT c.kb_file_id, c.chunk_id, c.page_no, c.url, c.snippet, c.score, "
+                "f.filename AS filename FROM citation c "
+                "LEFT JOIN kb_file f ON f.id = c.kb_file_id "
+                "WHERE c.message_id = %s ORDER BY c.id ASC",
                 (message_id,),
             )
             return list(await cur.fetchall())
@@ -142,9 +152,12 @@ class ConversationRepository:
         if not message_ids:
             return {}
         placeholders = ", ".join(["%s"] * len(message_ids))
+        # 文件名走 join：citation 表本身不存文件名，历史数据也能回显出处
         sql = (
-            "SELECT message_id, kb_file_id, chunk_id, page_no, url, snippet, score "
-            f"FROM citation WHERE message_id IN ({placeholders}) ORDER BY id ASC"
+            "SELECT c.message_id, c.kb_file_id, c.chunk_id, c.page_no, c.url, c.snippet, c.score, "
+            "f.filename AS filename "
+            f"FROM citation c LEFT JOIN kb_file f ON f.id = c.kb_file_id "
+            f"WHERE c.message_id IN ({placeholders}) ORDER BY c.id ASC"
         )
         async with self._db.cursor() as cur:
             await cur.execute(sql, tuple(message_ids))

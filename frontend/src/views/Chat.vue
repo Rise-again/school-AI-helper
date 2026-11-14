@@ -2,11 +2,23 @@
 import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { Plus, Promotion, VideoPause, Link, RefreshRight } from "@element-plus/icons-vue";
-import MarkdownIt from "markdown-it";
-import DOMPurify from "dompurify";
 import { createConversation, downloadKbFile, listConversations, listMessages } from "@/api";
 import { streamChat } from "@/api/stream";
+import { renderMd } from "@/utils/markdown";
 import type { Citation, Conversation } from "@/types";
+
+/** 引用出处展示：知识库用文件名，联网结果用域名，都没有就写"来源" */
+function sourceName(c: Citation): string {
+  if (c.filename) return c.filename;
+  if (c.url) {
+    try {
+      return new URL(c.url).hostname;
+    } catch {
+      return "官网";
+    }
+  }
+  return "来源";
+}
 
 interface ChatMessage {
   id: string;
@@ -18,18 +30,7 @@ interface ChatMessage {
   meta?: { intent: string; degraded: string; evidence: number };
 }
 
-// 回答里可能有列表和表格，按 Markdown 渲染；html:false + DOMPurify 双层防注入
-const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
-const defaultLinkOpen = md.renderer.rules.link_open ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
-md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
-  tokens[idx].attrSet("target", "_blank");
-  tokens[idx].attrSet("rel", "noopener noreferrer");
-  return defaultLinkOpen(tokens, idx, options, env, self);
-};
-
-function renderMd(text: string): string {
-  return DOMPurify.sanitize(md.render(text || ""));
-}
+// 回答里可能有列表和表格，结束后按 Markdown 渲染（流式期间显示纯文本，见模板）
 
 const conversations = ref<Conversation[]>([]);
 const activeId = ref<number | null>(null);
@@ -247,9 +248,8 @@ onMounted(loadConversations);
             <div v-if="m.citations?.length" class="cites">
               <div v-for="(c, i) in m.citations" :key="i" class="cite">
                 <el-icon><Link /></el-icon>
-                <span class="cite-text">
-                  [{{ i + 1 }}] {{ c.snippet }}
-                </span>
+                <span class="cite-file">{{ sourceName(c) }}</span>
+                <span class="cite-text">{{ c.snippet }}</span>
                 <el-tag v-if="c.page_no" size="small" type="info">第 {{ c.page_no }} 页</el-tag>
                 <el-button
                   v-if="c.url || c.kb_file_id"
@@ -380,54 +380,6 @@ onMounted(loadConversations);
   word-break: break-word;
 }
 
-/* Markdown 渲染后的排版：只作用于助手回答，用户气泡仍是纯文本 */
-.md {
-  white-space: normal;
-}
-.md :deep(p) {
-  margin: 0 0 8px;
-}
-.md :deep(p:last-child) {
-  margin-bottom: 0;
-}
-.md :deep(ul),
-.md :deep(ol) {
-  margin: 4px 0 8px;
-  padding-left: 20px;
-}
-.md :deep(li) {
-  margin: 2px 0;
-}
-.md :deep(table) {
-  border-collapse: collapse;
-  margin: 8px 0;
-  font-size: 13px;
-}
-.md :deep(th),
-.md :deep(td) {
-  border: 1px solid #e5e7eb;
-  padding: 4px 10px;
-  text-align: left;
-}
-.md :deep(th) {
-  background: #f8fafc;
-}
-.md :deep(code) {
-  background: #f3f4f6;
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 13px;
-}
-.md :deep(pre) {
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  padding: 10px;
-  border-radius: 8px;
-  overflow-x: auto;
-}
-.md :deep(a) {
-  color: #2563eb;
-}
 .skeleton {
   padding: 6px 2px;
 }
@@ -456,6 +408,14 @@ onMounted(loadConversations);
   gap: 6px;
   font-size: 12px;
   color: #6b7280;
+}
+.cite-file {
+  max-width: 38%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #374151;
+  font-weight: 500;
 }
 .cite-text {
   flex: 1;

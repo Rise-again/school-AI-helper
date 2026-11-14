@@ -45,6 +45,7 @@ export interface Message {
 export interface Citation {
   kb_file_id: number | null;
   chunk_id: string | null;
+  filename?: string | null;
   page_no: number | null;
   url: string | null;
   snippet: string;

@@ -283,6 +283,7 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
             {
                 "kb_file_id": e["kb_file_id"],
                 "chunk_id": e["chunk_id"],
+                "filename": e.get("filename"),  # 引用卡片要显示文件名
                 "page_no": e["page_no"],
                 "url": e["source_url"],
                 "snippet": e["content"][:200],

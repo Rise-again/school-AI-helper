@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from app.core.logging import log_fields
 import logging
+import socket
 
 if TYPE_CHECKING:  # 仅用于类型，运行时不需要 pydantic（本地验证脚本可单独跑）
     from app.core.config import Settings
@@ -81,6 +82,20 @@ class SchoolSdkEduClient:
             self._endpoints = _endpoints_with_base(self._settings.edu_base_path)
         return self._endpoints
 
+    def _preflight(self) -> None:
+        """先做一次带超时的 TCP 连接：SDK 自己没用 timeout 参数，
+        上游被防火墙静默丢包时会卡在系统级 connect（约 2 分钟），必须自己兜。"""
+        timeout = max(1.0, min(5.0, float(self._settings.edu_timeout_s)))
+        try:
+            with socket.create_connection(
+                (self._settings.edu_host, self._settings.edu_port), timeout=timeout
+            ):
+                return
+        except OSError as exc:
+            raise EduUnavailable(
+                f"无法连接教务系统（{self._settings.edu_host}:{self._settings.edu_port}）"
+            ) from exc
+
     # -------- 内部 --------
     def _build_client(self):
         try:
@@ -112,6 +127,7 @@ class SchoolSdkEduClient:
 
     # -------- 协议实现 --------
     def login(self, account: str, password: str) -> EduSession:
+        self._preflight()
         client = self._build_client()
         try:
             user = client.user_login(account, password)
@@ -120,6 +136,7 @@ class SchoolSdkEduClient:
         return EduSession(account=account, raw=user)
 
     def info(self, session: EduSession) -> dict[str, Any]:
+        self._preflight()
         try:
             data = session.raw.get_info()
         except Exception as exc:  # noqa: BLE001
@@ -127,6 +144,7 @@ class SchoolSdkEduClient:
         return data if isinstance(data, dict) else {}
 
     def schedule(self, session: EduSession, year: int, term: int) -> dict[str, Any]:
+        self._preflight()
         try:
             data = session.raw.get_schedule(year=year, term=term)
         except Exception as exc:  # noqa: BLE001
@@ -134,6 +152,7 @@ class SchoolSdkEduClient:
         return data if isinstance(data, dict) else {}
 
     def scores(self, session: EduSession, year: int, term: int) -> dict[str, Any]:
+        self._preflight()
         try:
             data = session.raw.get_score(year=year, term=term)
         except Exception as exc:  # noqa: BLE001

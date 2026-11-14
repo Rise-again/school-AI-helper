@@ -71,6 +71,18 @@ class EduService:
     def _lock(self, user_id: int) -> asyncio.Lock:
         return self._locks.setdefault(user_id, asyncio.Lock())
 
+    async def _thread(self, fn: Callable[..., Any], *args: Any, timeout: float | None = None) -> Any:
+        """同步 SDK 放到线程池，并在外层加硬超时。
+
+        SDK 的 timeout 参数只存进 config、并未真正传给 requests；上游被防火墙
+        丢包时会卡住约 2 分钟，用户等不起，这里统一兜到 15 秒左右。
+        """
+        limit = timeout if timeout is not None else self._settings.edu_timeout_s + 5
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=limit)
+        except asyncio.TimeoutError as exc:
+            raise EduUpstreamUnavailable("教务系统响应超时") from exc
+
     async def _binding(self, user_id: int) -> dict[str, Any]:
         row = await self._users.get_edu_binding(user_id)
         if not row or not row.get("edu_username") or not row.get("edu_cred_cipher"):
@@ -86,8 +98,11 @@ class EduService:
         except ValueError as exc:
             raise BadRequest("教务绑定信息已损坏，请重新绑定") from exc
         try:
-            session = await asyncio.to_thread(
-                self._client.login, str(row["edu_username"]), password
+            session = await self._thread(
+                self._client.login,
+                str(row["edu_username"]),
+                password,
+                timeout=self._settings.edu_timeout_s + 10,
             )
         except EduAuthError as exc:
             raise BadRequest("教务密码已变更或账号被锁定，请重新绑定") from exc
@@ -101,13 +116,13 @@ class EduService:
         async with self._lock(user_id):
             session = await self._session(user_id)
             try:
-                return await asyncio.to_thread(fn, session)
+                return await self._thread(fn, session)
             except EduSessionExpired:
                 logger.info("edu_session_expired", extra=log_fields(user_id=user_id, action=action))
                 self._sessions.pop(user_id, None)
                 session = await self._session(user_id, force=True)
                 try:
-                    return await asyncio.to_thread(fn, session)
+                    return await self._thread(fn, session)
                 except EduUpstreamUnavailable as exc:
                     raise EduUnavailable("教务系统暂时无法访问") from exc
             except EduUpstreamUnavailable as exc:
@@ -119,7 +134,9 @@ class EduService:
         if not student_no or not password:
             raise BadRequest("学号与教务密码不能为空")
         try:
-            session = await asyncio.to_thread(self._client.login, student_no, password)
+            session = await self._thread(
+                self._client.login, student_no, password, timeout=self._settings.edu_timeout_s + 10
+            )
         except EduAuthError as exc:
             raise BadRequest("教务账号或密码不正确") from exc
         except EduUpstreamUnavailable as exc:

@@ -35,6 +35,7 @@ class RetrievedChunk:
     heading_path: str
     source_url: str | None
     expired: bool
+    topics: str = ""
 
 
 class Retriever:
@@ -110,6 +111,7 @@ class Retriever:
                     heading_path=str(meta.get("heading_path") or ""),
                     source_url=record.get("source_url"),
                     expired=expired,
+                    topics=str(record.get("topics") or ""),
                 )
             )
 

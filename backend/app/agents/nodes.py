@@ -23,6 +23,7 @@ from app.integrations.anysearch import AnySearchClient
 from app.integrations.llm_client import LLMClient
 from app.rag.rerank import RerankerClient
 from app.rag.retriever import Retriever
+from app.rag.topics import detect_topics, keep_matching
 from app.repositories.search_cache import SearchCacheRepository
 
 logger = logging.getLogger("campus.agent")
@@ -177,6 +178,7 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
                 "kb_file_id": c.kb_file_id,
                 "score": c.score,
                 "origin": "kb",
+                "topics": getattr(c, "topics", ""),
             }
             for c in hits
         ]
@@ -248,10 +250,19 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
         keywords = state.get("keywords") or query
 
         kb_items = await _kb_search(query, keywords)
+        # 主题过滤：问题主题与文件主题不匹配的证据先剔掉。
+        # 识别到主题但库里没有对应文件时（如"新生军训"只有"征兵役前训练"），
+        # 视为库外，触发联网而不是拿相近文档硬凑。
+        topics = detect_topics(state.get("query"), keywords)
+        topic_miss = False
+        if topics:
+            matched = keep_matching(kb_items, topics)
+            topic_miss = bool(kb_items) and not matched
+            kb_items = matched
         kb_top = max((e["score"] for e in kb_items), default=0.0)
 
         # 用户明确要"最新/通知"时总补联网；否则知识库分数够就不花配额
-        want_web = intent == "web" or kb_top < KB_SUFFICIENT_SCORE
+        want_web = intent == "web" or kb_top < KB_SUFFICIENT_SCORE or topic_miss
         web_items: list[dict[str, Any]] = []
         degraded = ""
         if want_web:
@@ -305,6 +316,8 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
                 kb_top=round(kb_top, 3),
                 kept=len(kept),
                 want_web=want_web,
+                topics=",".join(sorted(topics)),
+                topic_miss=topic_miss,
             ),
         }
 

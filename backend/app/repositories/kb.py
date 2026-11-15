@@ -57,7 +57,7 @@ class KbRepository:
             return {}
         placeholders = ", ".join(["%s"] * len(file_ids))
         sql = (
-            f"SELECT id, filename, file_type, source_dept, source_url, effective_from, "
+            f"SELECT id, filename, file_type, source_dept, topics, source_url, effective_from, "
             f"effective_to, parse_status, deleted_at FROM kb_file WHERE id IN ({placeholders})"
         )
         async with self._db.cursor() as cur:

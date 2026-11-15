@@ -153,6 +153,7 @@ async def lifespan(app: FastAPI):
             search_user_daily_quota=settings.search_user_daily_quota,
             kb_titles_provider=kb_titles,
             edu=app.state.edu_service,
+            web_max_age_years=settings.web_max_age_years,
         )
     )
     app.state.chat_service = ChatService(

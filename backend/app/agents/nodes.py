@@ -21,6 +21,7 @@ from app.agents.state import INTENTS, ROUTER_PROMPT, AgentState, format_context,
 from app.core.errors import DependencyUnavailable, ModelUnavailable
 from app.integrations.anysearch import AnySearchClient
 from app.integrations.llm_client import LLMClient
+from app.rag.freshness import is_stale
 from app.rag.rerank import RerankerClient
 from app.rag.retriever import Retriever
 from app.rag.topics import detect_topics, keep_matching
@@ -67,6 +68,7 @@ class AgentDeps:
         search_user_daily_quota: int = 60,
         kb_titles_provider: Callable[[], Awaitable[list[str]]] | None = None,
         edu: Any | None = None,
+        web_max_age_years: int = 2,
     ) -> None:
         self.llm = llm
         self.retriever = retriever
@@ -77,6 +79,7 @@ class AgentDeps:
         self.search_user_daily_quota = search_user_daily_quota
         self.kb_titles_provider = kb_titles_provider
         self.edu = edu
+        self.web_max_age_years = web_max_age_years
 
 
 async def route_query(
@@ -218,11 +221,23 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
     @staticmethod
     def _web_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         kept = []
+        stale = 0
         for it in items:
             text = " ".join(str(it.get("content") or "").split())
+            # 时效性：页面最新年份距今太久的直接剔除（2026 年不拿 2023 年的新闻当依据）
+            if is_stale(
+                title=it.get("title"),
+                content=text,
+                url=it.get("url"),
+                max_age_years=deps.web_max_age_years,
+            ):
+                stale += 1
+                continue
             # 长度够 + 至少有一个完整句子，才算"能当依据的网页正文"
             if len(text) >= WEB_MIN_CONTENT_CHARS and "。" in text:
                 kept.append(it)
+        if stale:
+            logger.info("web_items_stale_dropped", extra={"extra_fields": {"count": stale}})
         if len(kept) < len(items):
             logger.info(
                 "web_items_unusable_dropped",

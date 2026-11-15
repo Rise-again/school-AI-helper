@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import asdict
 from typing import Any, Awaitable, Callable
 
@@ -24,7 +25,7 @@ from app.integrations.llm_client import LLMClient
 from app.rag.freshness import is_stale
 from app.rag.rerank import RerankerClient
 from app.rag.retriever import Retriever
-from app.rag.topics import detect_topics, keep_matching
+from app.rag.topics import detect_topics, keep_matching, split_topics
 from app.repositories.search_cache import SearchCacheRepository
 
 logger = logging.getLogger("campus.agent")
@@ -46,6 +47,16 @@ EVIDENCE_MIN_SCORE = 0.20
 WEB_MIN_CONTENT_CHARS = 80
 # 关键词改写后知识库最高分低于这个值，说明改写可能改偏了，用原句再检一次兜底
 KB_WEAK_SCORE = 0.50
+# 合并后证据最高分低于此值，且没有任何主题匹配时，视为"弱证据"，直接拒答
+WEAK_EVIDENCE_SCORE = 0.30
+# 含这些词的问句强制补联网（知识库仍保留，最终由重排决定）
+_TIME_SENSITIVE_RE = re.compile(r"最新|最近|今年|近期|通知|公告")
+# 出现这些校园实体词时，不允许落到寒暄/未知路径（渲染成"自由发挥"）
+_CAMPUS_WORD_RE = re.compile(
+    r"招生|录取|分数线|简章|专升本|放假|开学|报到|军训|宿舍|食堂|校医|班车|报修|"
+    r"图书馆|校园卡|选课|转专业|奖学金|助学金|勤工|学费|考试|补考|讲座|招聘|"
+    r"通知|安排|截止|报名|教务|辅导员|校区|体检|医保|接站|气候|天气|机场|火车站|快递|超市"
+)
 
 
 def keyword_intent(query: str) -> str:
@@ -148,10 +159,14 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
         intent, keywords = await route_query(
             deps.llm, state["query"], state.get("history"), terms
         )
+        guarded = False
+        if intent in ("unknown", "chitchat") and _CAMPUS_WORD_RE.search(state["query"]):
+            # 带校园实体词的问题不能当寒暄聊，交给检索/联网
+            intent, guarded = ("web", True)
         return {
             "intent": intent,
             "keywords": keywords,
-            "trace": _trace(state, "classify", intent=intent, keywords=keywords),
+            "trace": _trace(state, "classify", intent=intent, keywords=keywords, guarded=guarded),
         }
 
     async def _kb_search(query: str, keywords: str) -> list[dict[str, Any]]:
@@ -277,11 +292,13 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
         kb_top = max((e["score"] for e in kb_items), default=0.0)
 
         # 用户明确要"最新/通知"时总补联网；否则知识库分数够就不花配额
-        want_web = intent == "web" or kb_top < KB_SUFFICIENT_SCORE or topic_miss
+        time_sensitive = bool(_TIME_SENSITIVE_RE.search(query))
+        want_web = intent == "web" or kb_top < KB_SUFFICIENT_SCORE or topic_miss or time_sensitive
         web_items: list[dict[str, Any]] = []
         degraded = ""
         if want_web:
-            web_items, degraded = await _web_search(state, keywords)
+            # 联网用原句：实测"招生简章"这种改写词命中首页，原句反而能搜到招生章程正文
+            web_items, degraded = await _web_search(state, query)
 
         # 知识库结果已经用「改写后的关键词」重排过，不能再拿原句重排一遍：
         # 口语长句（"一般都做些什么工作"）对同一片段只能打 0.1–0.2 分，会把正确结果全部筛掉。
@@ -306,6 +323,17 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
 
         ranked = sorted(merged, key=lambda e: e["score"], reverse=True)
         kept = [e for e in ranked if e["score"] >= EVIDENCE_MIN_SCORE][:3]  # 证据越多越容易漏标
+
+        # 弱证据门禁：全都低于阈值、又没有主题匹配时，不硬答
+        if kept and max(e["score"] for e in kept) < WEAK_EVIDENCE_SCORE:
+            topic_hit = any(split_topics(e.get("topics")) & topics for e in kept) if topics else False
+            if not topic_hit:
+                return {
+                    "evidence": [],
+                    "citations": [],
+                    "degraded": "weak_evidence",
+                    "trace": _trace(state, "retrieve", kb=len(kb_items), web=len(web_items), kb_top=round(kb_top, 3), weak=True),
+                }
 
         citations = [
             {
@@ -333,6 +361,7 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
                 want_web=want_web,
                 topics=",".join(sorted(topics)),
                 topic_miss=topic_miss,
+                time_sensitive=time_sensitive,
             ),
         }
 

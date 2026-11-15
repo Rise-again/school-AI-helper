@@ -16,7 +16,7 @@ def test_detect_military_training_not_conscription():
 def test_detect_multi_topic_and_empty():
     assert detect_topics("助学金和奖学金能同时拿吗") == {"financial_aid", "scholarship"}
     assert detect_topics("勤工助学一周几小时") == {"work_study"}
-    assert detect_topics("学校食堂好吃吗") == set()
+    assert detect_topics("今天天气怎么样") == set()
     assert detect_topics(None, "") == set()
 
 
@@ -36,3 +36,8 @@ def test_keep_matching_filters_by_topic():
     assert kept == []  # 库里没有军训主题文件 → 全部剔除
     assert [i["content"] for i in keep_matching(items, {"work_study"})] == ["勤工助学工时"]
     assert keep_matching(items, set()) == items  # 识别不到主题时不过滤
+
+
+def test_admissions_and_service_topics_have_no_files():
+    assert detect_topics("2026年录取分数线是多少") == {"admissions"}
+    assert detect_topics("图书馆开放时间") == {"campus_service"}

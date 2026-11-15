@@ -113,6 +113,9 @@ class Settings(BaseModel):
     search_domain_suffix: str = "hntou.edu.cn"  # 动态搜索只保留校内来源
     search_user_daily_quota: int = Field(default=60, ge=1)  # 每用户每天最多触发多少次联网搜索
     web_max_age_years: int = Field(default=2, ge=1, le=10)  # 网页最新年份距今 ≥N 年视为过时，不进证据
+    web_fetch_body: bool = True  # 抓取网页正文，解决搜索摘要过短
+    web_fetch_timeout_s: float = Field(default=2.0, gt=0)
+    web_fetch_max: int = Field(default=3, ge=1, le=8)
     edu_host: str = "zfjw.hntou.edu.cn"
     edu_port: int = Field(default=80, ge=1, le=65535)
     edu_ssl: bool = False

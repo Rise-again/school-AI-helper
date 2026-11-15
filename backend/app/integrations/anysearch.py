@@ -7,12 +7,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import re
 import json
 import logging
 from typing import Any
 
 import httpx
+from bs4 import BeautifulSoup
 
 from app.core.errors import DependencyUnavailable
 
@@ -37,6 +40,9 @@ class AnySearchClient:
         domain_suffix: str = "hntou.edu.cn",
         timeout: float = 5.0,  # 计划要求超时 5s 内降级
         max_results: int = 8,
+        fetch_body: bool = True,
+        fetch_timeout: float = 2.0,
+        fetch_max: int = 3,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._key = api_key
@@ -44,6 +50,9 @@ class AnySearchClient:
         self._suffix = domain_suffix
         self._timeout = timeout
         self._max = max_results
+        self._fetch_body = fetch_body
+        self._fetch_timeout = fetch_timeout
+        self._fetch_max = fetch_max
 
     @property
     def enabled(self) -> bool:
@@ -98,7 +107,68 @@ class AnySearchClient:
                     "content": str(item.get("content") or item.get("snippet") or "")[:800],
                 }
             )
-        return items[: self._max]
+        items = items[: self._max]
+        preferred = [it for it in items if self._looks_like_article(it["url"])]
+        # 全是首页/栏目页时保留原列表（交给可用性门禁丢弃），否则只看正文页
+        if preferred:
+            items = preferred
+        await self._fill_body(items)
+        return items
+
+    @staticmethod
+    def extract_text(html: str) -> str:
+        """从网页 HTML 里提取正文：优先找文章容器，否则退回 body。"""
+        soup = BeautifulSoup(html or "", "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "iframe", "form"]):
+            tag.decompose()
+
+        def normalize(node) -> str:
+            return " ".join(node.get_text(" ").split())
+
+        candidates = []
+        for selector in (
+            "article", "div.article", "div.content", "div#content", "div.main",
+            "div.news_content", "div.article-content", "div.v_news_content", "div#vsb_content",
+            "div.wp_articlecontent", "div.TRS_Editor",
+        ):
+            for node in soup.select(selector):
+                text = normalize(node)
+                if len(text) >= 80:
+                    candidates.append(text)
+        body_text = normalize(soup.body or soup)
+        # 正文容器通常长度适中、且不是全站导航；取最长候选，否则 body
+        return (max(candidates, key=len) if candidates else body_text)[:1500]
+
+    @staticmethod
+    def _looks_like_article(url: str) -> bool:
+        """过滤首页/栏目根页：优先保留含日期或深路径的正文页。"""
+        try:
+            path = httpx.URL(url).path
+        except Exception:
+            return True
+        if path in ("", "/"):
+            return False
+        if re.search(r"/t20\d{6}_?\d*\.html?", path):
+            return True
+        return path.count("/") >= 3
+
+    async def _fill_body(self, items: list[dict[str, Any]]) -> None:
+        """把摘要换成抓到的正文；抓取失败保留原摘要。"""
+        if not self._fetch_body or not items:
+            return
+        targets = items[: self._fetch_max]
+        async with httpx.AsyncClient(timeout=self._fetch_timeout, follow_redirects=True) as client:
+            async def one(item: dict[str, Any]):
+                try:
+                    resp = await client.get(item["url"])
+                    if resp.status_code != 200:
+                        return
+                    text = self.extract_text(resp.text[:300_000])
+                    if len(text) > len(item["content"]):
+                        item["content"] = text
+                except httpx.HTTPError:
+                    return
+            await asyncio.gather(*(one(it) for it in targets))
 
     @staticmethod
     def cache_key(query: str, zone: str = "cn") -> str:

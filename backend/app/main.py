@@ -130,6 +130,9 @@ async def lifespan(app: FastAPI):
         settings.anysearch_api_key,
         zone=settings.anysearch_zone,
         domain_suffix=settings.search_domain_suffix,
+        fetch_body=settings.web_fetch_body,
+        fetch_timeout=settings.web_fetch_timeout_s,
+        fetch_max=settings.web_fetch_max,
     )
     kb_repo_for_terms = KbRepository(db)
     _terms_cache: dict[str, Any] = {"at": 0.0, "titles": []}

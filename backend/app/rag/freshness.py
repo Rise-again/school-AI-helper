@@ -16,6 +16,14 @@ import re
 from datetime import date
 
 _YEAR_RE = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
+# 页脚版权/备案年份不代表内容时效，先剔除再取年份
+_FOOTER_RE = re.compile(
+    r"(?i)(copyright|all rights reserved|©|版权|备案|icp备|琼icp|技术支持|网站地图|关于我们).{0,60}"
+)
+
+
+def _strip_footer(text: str) -> str:
+    return _FOOTER_RE.sub(" ", text or "")
 
 
 def page_years(*texts: str | None) -> set[int]:
@@ -23,7 +31,8 @@ def page_years(*texts: str | None) -> set[int]:
     for text in texts:
         if not text:
             continue
-        for match in _YEAR_RE.findall(str(text)):
+        cleaned = _strip_footer(str(text))
+        for match in _YEAR_RE.findall(cleaned):
             year = int(match)
             if 2000 <= year <= date.today().year + 1:  # 明显不合法的年份不算
                 years.add(year)

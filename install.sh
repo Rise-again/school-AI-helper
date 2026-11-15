@@ -127,7 +127,7 @@ echo "  → vllm（推理）"
 
 echo "  → 下载环境（模型下载用）"
 [ -x "$VENV_DIR/dl/bin/python" ] || python3 -m virtualenv -q "$VENV_DIR/dl" -p python3
-"$VENV_DIR/dl/bin/pip" install -q -U pip modelscope
+"$VENV_DIR/dl/bin/pip" install -q -U pip modelscope huggingface_hub
 ok "依赖安装完成"
 
 # ---------------------------------------------------------------- 5 模型权重
@@ -170,6 +170,29 @@ SQL
   echo "  执行迁移与演示数据"
   PYTHONPATH=backend "$VENV_DIR/web/bin/python" scripts/migrate.py
   PYTHONPATH=backend "$VENV_DIR/web/bin/python" scripts/seed_demo.py | tail -6
+
+  # LoRA adapter（可选）：ADAPTER_REPO=Rise-again/campus-lora-p4-v1
+  if [ -n "${ADAPTER_REPO:-}" ]; then
+    echo "  下载 LoRA adapter：$ADAPTER_REPO"
+    "$VENV_DIR/dl/bin/python" scripts/fetch_adapter.py \
+      --repo "$ADAPTER_REPO" \
+      --revision "${ADAPTER_REVISION:-}" \
+      --endpoint "${HF_ENDPOINT:-}"
+    sed -i 's/^LLM_MODEL=.*/LLM_MODEL=campus-lora/' backend/.env
+    if grep -q '^ADAPTER_REPO=' backend/.env; then
+      sed -i "s|^ADAPTER_REPO=.*|ADAPTER_REPO=${ADAPTER_REPO}|" backend/.env
+    else
+      printf 'ADAPTER_REPO=%s\n' "$ADAPTER_REPO" >> backend/.env
+    fi
+    if grep -q '^ADAPTER_REVISION=' backend/.env; then
+      sed -i "s|^ADAPTER_REVISION=.*|ADAPTER_REVISION=${ADAPTER_REVISION:-}|" backend/.env
+    else
+      printf 'ADAPTER_REVISION=%s\n' "${ADAPTER_REVISION:-}" >> backend/.env
+    fi
+    ok "adapter 就绪，LLM_MODEL=campus-lora"
+  else
+    warn "未设置 ADAPTER_REPO，跳过 adapter；之后可运行 scripts/fetch_adapter.py 再改 LLM_MODEL=campus-lora"
+  fi
 fi
 
 # ---------------------------------------------------------------- 7 自检

@@ -113,7 +113,7 @@ function send() {
         resize="none"
         maxlength="500"
         show-word-limit
-        placeholder="输入问题，Enter 发送（每 IP 每分钟限 10 次）"
+        placeholder="输入问题，Enter 发送（每位访客每分钟限 10 次）"
         @keydown.enter.exact.prevent="send"
       />
       <div class="actions">

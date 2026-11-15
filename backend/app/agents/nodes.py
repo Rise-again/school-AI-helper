@@ -208,16 +208,24 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
             return [], "search_disabled"
 
         key = deps.search.cache_key(query)
-        cached = await deps.cache.get(key)
+        try:
+            cached = await deps.cache.get(key)
+        except Exception as exc:  # noqa: BLE001 - 缓存/MySQL 故障不该拖垮问答
+            logger.warning("search_cache_unavailable", extra={"extra_fields": {"error": exc.__class__.__name__}})
+            return [], "cache_unavailable"
         if cached is not None:
             return _web_items(cached), ""
 
         identity = state.get("identity") or "guest:unknown"
-        # 先扣个人额度再扣全局：个人超额时不该白白消耗全局池
-        user_ok = await deps.cache.consume_daily(f"anysearch:{identity}", deps.search_user_daily_quota)
-        global_ok = False
-        if user_ok:
-            global_ok = await deps.cache.consume_daily("anysearch:global", deps.search_daily_quota)
+        try:
+            # 先扣个人额度再扣全局：个人超额时不该白白消耗全局池
+            user_ok = await deps.cache.consume_daily(f"anysearch:{identity}", deps.search_user_daily_quota)
+            global_ok = False
+            if user_ok:
+                global_ok = await deps.cache.consume_daily("anysearch:global", deps.search_daily_quota)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("search_quota_unavailable", extra={"extra_fields": {"error": exc.__class__.__name__}})
+            return [], "quota_unavailable"
         if not user_ok or not global_ok:
             logger.warning(
                 "search_quota_exceeded",
@@ -281,7 +289,15 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
         keywords = state.get("keywords") or query
         metrics.inc("retrieval.requests")
 
-        kb_items = await _kb_search(query, keywords)
+        kb_error = ""
+        try:
+            kb_items = await _kb_search(query, keywords)
+        except DependencyUnavailable as exc:
+            # 向量库/embedding 不可用时降级：跳过知识库，尝试联网或拒答
+            logger.warning("kb_unavailable", extra={"extra_fields": {"error": str(exc)[:200]}})
+            metrics.inc("retrieval.kb_unavailable")
+            kb_items = []
+            kb_error = "kb_unavailable"
         # 主题过滤：问题主题与文件主题不匹配的证据先剔掉。
         # 识别到主题但库里没有对应文件时（如"新生军训"只有"征兵役前训练"），
         # 视为库外，触发联网而不是拿相近文档硬凑。
@@ -297,10 +313,11 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
         time_sensitive = bool(_TIME_SENSITIVE_RE.search(query))
         want_web = intent == "web" or kb_top < KB_SUFFICIENT_SCORE or topic_miss or time_sensitive
         web_items: list[dict[str, Any]] = []
-        degraded = ""
+        degraded = kb_error
         if want_web:
             # 联网用原句：实测"招生简章"这种改写词命中首页，原句反而能搜到招生章程正文
-            web_items, degraded = await _web_search(state, query)
+            web_items, web_degraded = await _web_search(state, query)
+            degraded = web_degraded or kb_error
 
         # 知识库结果已经用「改写后的关键词」重排过，不能再拿原句重排一遍：
         # 口语长句（"一般都做些什么工作"）对同一片段只能打 0.1–0.2 分，会把正确结果全部筛掉。

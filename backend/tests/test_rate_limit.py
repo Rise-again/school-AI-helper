@@ -127,10 +127,14 @@ def test_metrics_summary_and_counters():
     m.inc("http.requests")
     for value in (100, 200, 300):
         m.observe("latency", value)
+    m.record_slow(path="/slow", method="GET", status=200, ms=1200)
+    m.record_slow(path="/slower", method="POST", status=500, ms=3500)
     snap = m.snapshot()
     assert snap["counters"]["http.requests"] == 2
     assert snap["timers"]["latency"]["count"] == 3
     assert snap["timers"]["latency"]["p50"] == 200
+    assert snap["slow_top"][0]["path"] == "/slower"
+    assert snap["slow_top"][0]["ms"] == 3500
 
 
 # ---------- HTTP 语义 ----------

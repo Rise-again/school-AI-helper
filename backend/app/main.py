@@ -93,6 +93,7 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001 - chromadb 缺失/损坏不应导致整个服务起不来
         logger.error("vector_store_unavailable", extra=log_fields(error=str(exc)[:300]))
         vector_store = UnavailableVectorStore(str(exc)[:300])
+    app.state.vector_store = vector_store
 
     embedder = HttpEmbeddingClient(settings.embed_base_url, batch_size=settings.embed_batch_size)
     ocr_client = HttpOcrClient(settings.ocr_base_url, timeout=settings.ocr_timeout_s)
@@ -278,6 +279,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if not is_sse:
                 metrics.observe("http.latency_ms", elapsed_ms)
                 if elapsed_ms >= settings.slow_request_ms:
+                    metrics.record_slow(
+                        path=request.url.path,
+                        method=request.method,
+                        status=response.status_code,
+                        ms=elapsed_ms,
+                    )
                     logger.warning(
                         "slow_request",
                         extra=log_fields(
@@ -377,13 +384,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         mysql_ok = await db.ping()
         llm_ok = await probe(f"{cfg.llm_base_url.rstrip('/')}/models")
         models_ok = await probe(f"{cfg.ocr_base_url.rstrip('/')}/healthz")
-        ok = mysql_ok and llm_ok and models_ok
+        # 向量库初始化失败时服务仍能起，但问答会降级；探针必须如实反映
+        try:
+            vector_count = await asyncio.to_thread(app.state.vector_store.count)
+            vector_ok = True
+            vector_detail = f"ok:{vector_count}"
+        except Exception as exc:  # noqa: BLE001
+            vector_ok = False
+            vector_detail = f"{exc.__class__.__name__}: {str(exc)[:120]}"
+        ok = mysql_ok and llm_ok and models_ok and vector_ok
         body = {
             "status": "ok" if ok else "degraded",
             "components": {
                 "mysql": "ok" if mysql_ok else (db.last_error or "down"),
                 "llm": "ok" if llm_ok else "down",
                 "models": "ok" if models_ok else "down",
+                "chroma": vector_detail,
             },
         }
         return JSONResponse(status_code=200 if ok else 503, content=body)

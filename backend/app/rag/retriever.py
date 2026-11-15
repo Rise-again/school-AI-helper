@@ -72,7 +72,12 @@ class Retriever:
         vectors = await self._embedder.embed([query])
         if not vectors:
             raise DependencyUnavailable("查询向量化失败")
-        hits = await asyncio.to_thread(self._store.query, embedding=vectors[0], top_k=self._top_k)
+        try:
+            hits = await asyncio.to_thread(self._store.query, embedding=vectors[0], top_k=self._top_k)
+        except DependencyUnavailable:
+            raise
+        except Exception as exc:  # noqa: BLE001 - Chroma 运行时异常统一转成可降级错误
+            raise DependencyUnavailable(f"向量检索失败：{exc.__class__.__name__}") from exc
         if not hits:
             return []
 

@@ -12,12 +12,46 @@ class KbRepository:
         self._db = db
 
     # ---------- 文件 ----------
-    async def find_by_hash(self, file_hash: str) -> dict[str, Any] | None:
+    async def find_by_hash(self, file_hash: str, *, include_deleted: bool = False) -> dict[str, Any] | None:
+        suffix = "" if include_deleted else " AND deleted_at IS NULL"
         async with self._db.cursor() as cur:
             await cur.execute(
-                "SELECT * FROM kb_file WHERE file_hash = %s AND deleted_at IS NULL", (file_hash,)
+                f"SELECT * FROM kb_file WHERE file_hash = %s{suffix}", (file_hash,)
             )
             return await cur.fetchone()
+
+    async def revive_file(
+        self,
+        file_id: int,
+        *,
+        filename: str,
+        file_type: str,
+        size_bytes: int,
+        source_dept: str | None,
+        source_url: str | None,
+        effective_from: str | None,
+        effective_to: str | None,
+        uploaded_by: int | None,
+    ) -> None:
+        """同内容文件曾被软删除：恢复原记录并重置解析状态，避免 uk_hash 冲突。"""
+        async with self._db.cursor() as cur:
+            await cur.execute(
+                "UPDATE kb_file SET filename=%s, file_type=%s, size_bytes=%s, source_dept=%s, "
+                "source_url=%s, effective_from=%s, effective_to=%s, uploaded_by=%s, deleted_at=NULL, "
+                "parse_status='pending', parse_channel=NULL, chunk_count=0, version=version+1 "
+                "WHERE id=%s",
+                (
+                    filename,
+                    file_type,
+                    size_bytes,
+                    source_dept,
+                    source_url,
+                    effective_from,
+                    effective_to,
+                    uploaded_by,
+                    file_id,
+                ),
+            )
 
     async def create_file(
         self,

@@ -2,7 +2,9 @@
 
 面向高校的校园问答与教务服务系统。三角色（访客 / 学生 / 管理员），回答附原文依据，支持知识库管理与教务查询。
 
-> 状态：P0–P3、P4 微调（campus-lora 已上线）、P5 教务（代码验收通过，教务仅校内网待联调）、P6 前端已完成；P7–P9 待做。
+> 状态：P0–P8 已完成（P8/M8 已签收），P9 部署交付进行中；教务真实数据联调受校方网络限制。
+> 演示地址：`http://i-2.gpushare.com:44368/`（HTTP，无 TLS）。
+> **从零部署请直接看 [docs/32-从GitHub部署全流程.md](docs/32-从GitHub部署全流程.md)。**
 > 许可：[MIT](LICENSE)
 
 ## 一键安装
@@ -44,7 +46,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
 ## 架构
 
 ```
-[浏览器] ──HTTPS──> [FastAPI + MySQL + ChromaDB]  ← 前后端同端口
+[浏览器] ──HTTP──> [FastAPI + MySQL + ChromaDB]  ← 前后端同端口
                               │ HTTP
                               ▼
                     [云端 GPU：vLLM + model-service]
@@ -87,7 +89,11 @@ docs/                    需求、版本、架构、库表、接口、部署、�
 | `bash scripts/backup.sh --full` | 备份到恒源云「个人数据」（需先 `oss login`） |
 | `bash scripts/restore.sh --timestamp <时间戳> --full` | 从备份恢复 |
 | `python scripts/check_env.py` | 环境自检 |
-| `cd backend && pytest` | 后端测试（55 条；加 `TEST_MYSQL=1` 跑 5 条真库用例） |
+| `python scripts/p9_healthcheck.py` | 每日巡检（探针/磁盘/显存/配额/日志轮转） |
+| `python scripts/seed_kb.py` | 导入 20 份 KB 种子（`data/kb_seed`，含 topics 回填） |
+| `python scripts/seed_demo_chats.py` | 重置三角色演示会话 |
+| `python scripts/fetch_adapter.py --repo <hf-user>/campus-lora-p4-v1` | 从 Hugging Face 下载 LoRA adapter |
+| `cd backend && pytest` | 后端测试（232 通过；`TEST_MYSQL=1` 跑集成） |
 | `cd model_service && pytest` | 模型服务契约测试（8 条） |
 
 ## 配置
@@ -105,8 +111,8 @@ docs/                    需求、版本、架构、库表、接口、部署、�
 
 ## 演示账号
 
-`admin / Admin@12345`（管理员）、`20230001 / Student@123`（学生）。**上线前必须修改。**
+`admin / Admin@12345`（管理员）、`20230001 / Student@123`（学生）、`20230002 / Student@123`（学生）。课程演示按 D-22 保留；交付后建议更换口令。
 
 ## 文档
 
-[需求基线](docs/01-需求基线.md) ｜ [版本矩阵](docs/02-版本矩阵.md) ｜ [架构](docs/03-架构设计.md) ｜ [库表](docs/04-数据库设计.md) ｜ [API](docs/05-API规范.md) ｜ [部署](docs/06-部署手册.md) ｜ [测试](docs/07-测试计划.md) ｜ [预算](docs/08-资源预算.md) ｜ [部署决策](docs/09-部署决策.md) ｜ [开发日志](docs/devlog.md)
+[需求基线](docs/01-需求基线.md) ｜ [版本矩阵](docs/02-版本矩阵.md) ｜ [架构](docs/03-架构设计.md) ｜ [库表](docs/04-数据库设计.md) ｜ [API](docs/05-API规范.md) ｜ [部署](docs/06-部署手册.md) ｜ [测试](docs/07-测试计划.md) ｜ [预算](docs/08-资源预算.md) ｜ [部署决策](docs/09-部署决策.md) ｜ `docs/10`～`18` 评测/微调/性能/演练 ｜ `docs/19`～`23` P8 收口 ｜ [P9 部署运维](docs/24-P9-部署与运维说明.md) ｜ [备份恢复](docs/25-P9-备份恢复演练.md) ｜ [演示脚本](docs/26-P9-演示脚本.md) ｜ [发布回滚](docs/27-P9-发布与回滚手册.md) ｜ [验收自测](docs/28-P9-验收自测表与答辩提纲.md) ｜ [成本保留](docs/29-P9-成本与关停策略.md) ｜ [镜像与交付](docs/30-P9-镜像与交付清单.md) ｜ [LoRA/HF 分发](docs/31-LoRA与HuggingFace分发.md) ｜ [从 GitHub 部署全流程](docs/32-从GitHub部署全流程.md) ｜ [开发日志](docs/devlog.md)

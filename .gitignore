@@ -18,11 +18,16 @@ htmlcov/
 # Node
 node_modules/
 dist/
+# 前端构建产物需要入库：服务器没有 Node 20，离线部署直接用 dist
+!frontend/dist/
+!frontend/dist/**
 .vite/
 *.local
 
-# 数据与模型（不入库）
-data/
+# 数据与模型（不入库；知识库种子例外）
+/data/*
+!/data/kb_seed/
+!/data/kb_seed/**
 models/
 *.db
 *.sqlite3

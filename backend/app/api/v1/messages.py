@@ -10,6 +10,7 @@ replace：落地校验命中（回答里有资料中没有的具体内容）时�
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 
 from fastapi import APIRouter, Depends, Path, Request
@@ -23,6 +24,7 @@ from app.services.chat_service import ChatService
 router = APIRouter(prefix="/conversations", tags=["chat"])
 guest_router = APIRouter(tags=["chat"])
 _student_or_admin = require_roles("student", "admin")
+logger = logging.getLogger("campus.chat")
 
 
 class MessageCreate(BaseModel):
@@ -63,7 +65,8 @@ async def send_message(
                 else:
                     yield f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
         except Exception as exc:  # noqa: BLE001 - 流已开始，只能以事件告知
-            body = {"message": f"服务异常：{exc.__class__.__name__}"}
+            logger.exception("stream_failed", extra={"extra_fields": {"path": "messages"}})
+            body = {"message": "服务暂时不可用，请稍后再试"}
             yield f"event: error\ndata: {json.dumps(body, ensure_ascii=False)}\n\n"
         finally:
             ticket.release()
@@ -108,7 +111,8 @@ async def ask_anonymous(
                 else:
                     yield f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
         except Exception as exc:  # noqa: BLE001
-            body = {"message": f"服务异常：{exc.__class__.__name__}"}
+            logger.exception("stream_failed", extra={"extra_fields": {"path": "anonymous"}})
+            body = {"message": "服务暂时不可用，请稍后再试"}
             yield f"event: error\ndata: {json.dumps(body, ensure_ascii=False)}\n\n"
         finally:
             ticket.release()

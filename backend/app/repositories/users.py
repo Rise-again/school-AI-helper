@@ -78,7 +78,26 @@ class UserRepository:
         )
         async with self._db.cursor() as cur:
             await cur.execute(sql, (user_id,))
-            return await cur.fetchone()
+            row = await cur.fetchone()
+        if row:
+            row["edu_cred_cipher"] = self._cipher_from_db(row.get("edu_cred_cipher"))
+        return row
+
+    @staticmethod
+    def _cipher_from_db(value: Any) -> bytes | None:
+        """兼容两种存法：新数据是 hex 字符串（aiomysql 对 bytes 参数有兼容问题），
+        旧数据可能是原始 bytes；统一还原成原始密文字节。"""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return bytes.fromhex(value)
+        if isinstance(value, (bytes, bytearray)):
+            raw = bytes(value)
+            try:
+                return bytes.fromhex(raw.decode("ascii"))
+            except (UnicodeDecodeError, ValueError):
+                return raw
+        return bytes(value)
 
     async def save_edu_binding(
         self, *, user_id: int, student_no: str, edu_username: str, cred_cipher: bytes
@@ -89,8 +108,9 @@ class UserRepository:
             "ON DUPLICATE KEY UPDATE edu_username = VALUES(edu_username), "
             "edu_cred_cipher = VALUES(edu_cred_cipher), edu_bound_at = NOW()"
         )
+        # aiomysql 0.3.2 + pymysql 2.2.8 对 bytes 参数会抛 TypeError，存 hex 字符串规避
         async with self._db.cursor() as cur:
-            await cur.execute(sql, (user_id, student_no, edu_username, cred_cipher))
+            await cur.execute(sql, (user_id, student_no, edu_username, cred_cipher.hex()))
 
     async def clear_edu_binding(self, user_id: int) -> None:
         sql = (

@@ -1,0 +1,202 @@
+[
+ {
+  "filename": "学籍管理规定.txt",
+  "file_hash": "684c96cc68c08801411f2f41ee72eafabf2e9f228eb2565e7e6a02c81a93fe14",
+  "file_type": "txt",
+  "source_dept": "教务处",
+  "source_url": "https://jwc.hntou.edu.cn/xjgl.html",
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "registration"
+ },
+ {
+  "filename": "2025-2026-1通识类选修课开课目录.xlsx",
+  "file_hash": "5ba19672b319d5d67d5d33d84253b658c02d932b9ca4313c8cdd6a5b6c426e74",
+  "file_type": "xlsx",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "course_select"
+ },
+ {
+  "filename": "2026年10月秋季征兵折页.pdf",
+  "file_hash": "e3c0c4866fdda489484106de5ff8989f2dfb6acce7bbddde2dc32e9ee8894896",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "conscription"
+ },
+ {
+  "filename": "三亚-实习岗位征集表.xls",
+  "file_hash": "ef45b5a0a33d9eaf2783546c633a1f5241513c1c053121e3c2a55a371b57149b",
+  "file_type": "xls",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "internship"
+ },
+ {
+  "filename": "人文社会科学学院2026年本科生转专业实施方案.pdf",
+  "file_hash": "c38f86b5ae720c962984e795232c99f97b1c31cf32be9c0f0f5c60ba8b4bf235",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "transfer_major"
+ },
+ {
+  "filename": "儋州-实习计划表.xls",
+  "file_hash": "2857b9e4c85763c1429061ce33cb5a4aa0f571f53a5d0061b08896feaf0acb76",
+  "file_type": "xls",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "internship"
+ },
+ {
+  "filename": "关于2026-2027学年《国家学生体质健康标准》测试工作通知..pdf",
+  "file_hash": "b838efad6f50206a982e4ce183c87e77cab0225804ff7d4ad32330650ef49b34",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "physical_test"
+ },
+ {
+  "filename": "参军量化考核标准.pdf",
+  "file_hash": "b8d564bf3f5c43d63b5703818135e03b5e4f1caed05444aacadd4a1526dd108f",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "conscription"
+ },
+ {
+  "filename": "大学体育3选课操作方法(7).pdf",
+  "file_hash": "7a03f2ceddf79ee5e9a91af7014294dc256e0f8efd5b1ceb79e22735f9c69f7a",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "course_select"
+ },
+ {
+  "filename": "海南热带海洋学院国家助学金评定实施办法.pdf",
+  "file_hash": "5d67cc7f5a8a16239a5ae21ff397c92da2dbddfa1b46cc397e51a03502c77117",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "financial_aid"
+ },
+ {
+  "filename": "海南热带海洋学院国家励志奖学金评审实施办法.pdf",
+  "file_hash": "fd339461c9cf1c0137d039ec64e3638103e9c307807ed3a8a939713e93dee062",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "scholarship,financial_aid"
+ },
+ {
+  "filename": "海南热带海洋学院学生勤工助学管理办法.pdf",
+  "file_hash": "63cd89337b92cc5c58654157938694a4d89f9d807c4c36fe7ee7efc5afac8e22",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "work_study"
+ },
+ {
+  "filename": "海南热带海洋学院家庭经济困难学生学费减免实施办法.pdf",
+  "file_hash": "b05f79cf0c15b6243f97a0152c90ab125c258d808ef7cafa2115ef9982197fb3",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "tuition,financial_aid"
+ },
+ {
+  "filename": "海南热带海洋学院家庭经济困难学生认定办法.pdf",
+  "file_hash": "82d41df94999f9fccb3e186297df7b506972747d5431b453e8cb2e7da8fc0bc6",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "financial_aid"
+ },
+ {
+  "filename": "海南热带海洋学院少数民族学生学费补助实施办法.pdf",
+  "file_hash": "cad029cc26060cf54fa4bf8350c6de83ccd828d1670ffd69f441085c5517c43b",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "tuition,financial_aid"
+ },
+ {
+  "filename": "海南热带海洋学院新生入学“绿色通道”实施办法.pdf",
+  "file_hash": "9207d87e742bce7aec172fcfea4c2c46a9929c15252b8eec5d92ae294de12e7a",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "tuition,financial_aid,registration"
+ },
+ {
+  "filename": "海南热带海洋学院校内勤工助学岗位管理办法.pdf",
+  "file_hash": "a2dd2d36be544bd81eb7bc0d4873dc007b916fd3d00f11641092a64faa6f459c",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "work_study"
+ },
+ {
+  "filename": "海南热带海洋学院海南省优秀贫困大学生奖学金评审实施办法.pdf",
+  "file_hash": "d5e581c26722ecab16a0659c819ad4b7a28ec8491a62c1c4126e2897ff35df99",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "scholarship,financial_aid"
+ },
+ {
+  "filename": "热海大高校征兵20问解答（最新版）.pdf",
+  "file_hash": "deb443c5b1d0552a3fb293a76e1bd594ea2c4dc85acb2176edc96c50cc5980d7",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "conscription"
+ },
+ {
+  "filename": "计算机学院2025-2026学年第二学期学生转专业工作实施方案.pdf",
+  "file_hash": "3ce59239c4195437a8fdd9a88085f4d58dc504ffe9fa01c0353d75513dcdced7",
+  "file_type": "pdf",
+  "source_dept": "评估语料",
+  "source_url": null,
+  "effective_from": null,
+  "effective_to": null,
+  "topics": "transfer_major"
+ }
+]

@@ -18,12 +18,25 @@ _MAX_SAMPLES = 1000
 
 
 class Metrics:
-    def __init__(self, *, max_samples: int = _MAX_SAMPLES) -> None:
+    def __init__(self, *, max_samples: int = _MAX_SAMPLES, slow_keep: int = 50) -> None:
         self._counters: Counter[str] = Counter()
         self._samples: dict[str, deque[float]] = {}
         self._gauges: dict[str, float | int] = {}
         self._max_samples = max_samples
+        # 慢请求只留最近 N 条（有界内存），/metrics 时按耗时取前 10
+        self._slow: deque[dict[str, Any]] = deque(maxlen=slow_keep)
         self.started_at = time.time()
+
+    def record_slow(self, *, path: str, method: str, status: int, ms: float) -> None:
+        self._slow.append(
+            {
+                "path": path,
+                "method": method,
+                "status": status,
+                "ms": round(ms, 1),
+                "at": round(time.time()),
+            }
+        )
 
     def inc(self, name: str, value: int = 1) -> None:
         self._counters[name] += value
@@ -66,6 +79,7 @@ class Metrics:
             "counters": dict(sorted(self._counters.items())),
             "timers": {k: self._summary(v) for k, v in sorted(self._samples.items())},
             "gauges": dict(sorted(self._gauges.items())),
+            "slow_top": sorted(self._slow, key=lambda item: item["ms"], reverse=True)[:10],
         }
 
     def reset(self) -> None:
@@ -73,6 +87,7 @@ class Metrics:
         self._counters.clear()
         self._samples.clear()
         self._gauges.clear()
+        self._slow.clear()
         self.started_at = time.time()
 
 

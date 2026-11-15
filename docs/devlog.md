@@ -442,3 +442,99 @@
 - 资源：vLLM 18818MiB（18.4GiB）+ model-service 3308MiB（3.2GiB）= 21.6GiB；事件循环最大延迟 5.4ms（无告警）；后端 RSS 173.5MB；队列等待 P95 约 3.0s、最大 6.2s。
 - P7-03 结论：当前参数（0.75/6144/8/eager）已满足 6 并发与显存口径，不做调参；重启 vLLM 的冷启动风险与收益不匹配，10 并发时延本来不作承诺。
 - 文档：新增 `docs/17-P7-性能报告.md`；计划 M7 改为“压测已完成、演练待做”，P7-04 口径统一为 6 并发 P95 ≤3s；测试计划补 P7 性能章节与基线表。P7-06 六类故障演练待安排停服窗口。
+- 补测（同日）：服务器直连自己的公网入口报 `ConnectError`（NAT 回环不支持），改从沙箱外部经 `http://i-2.gpushare.com:44368` 打 2/5 并发各 10 请求：P95 首字 **2.46s / 2.31s**、错误率 0%，SSE 未被代理缓冲。显存每秒采样 30 次恒为 **22141MiB（21.6GiB）**，无爬升。`/metrics` 补 `slow_top`（最近 50 条慢请求取 Top-10），压测期间无非 SSE 慢请求，列表为空；单测覆盖排序。
+- 部署：`metrics.py`/`main.py` 更新后重启后端，`/readyz` 全绿；服务器上实际部署代码全量测试 **162 通过 5 跳过**。
+
+## P7-06 六类故障演练（2026-11-15 下午）
+- 准备：演练前备份 DB `db-pre-p7drill-20261115.sql.gz`（238KB）与 Chroma `chroma-pre-p7drill-20261115.tar.gz`（2.1MB）；在服务器临时 venv 装 Playwright + Chromium（`/tmp/pwvenv`、`/tmp/pw-browsers`，不碰 web/models 环境），用真实浏览器截图并收集 console error。
+- 结果：六种场景 + model-service 宕机全部通过，均无白屏、有可读提示、有恢复路径；截图在 `docs/p7-drill-shots/`，完整记录见 `docs/18-P7-故障演练报告.md`。
+  - vLLM 宕机：`/readyz` 503 llm down；访客页“回答服务暂时不可用”，36 秒恢复。
+  - Chroma 不可用：把 `data/chroma` 换成普通文件后重启；访客正常拒答、知识库页正常；恢复 33 秒。
+  - MySQL 断连：`/readyz` 503 mysql；访客页“服务暂时不可用”，登录页“服务器内部错误”；`service mysql start` 后 16 秒恢复。
+  - AnySearch 超时：`/etc/hosts` 黑洞 + 重启后端；`ConnectTimeout` 后静默用知识库作答，用户无感；恢复 hosts。
+  - 磁盘满：`fallocate` 到剩 1MB；上传返回 503/6001“存储空间不足或文件写入失败”；删除填充文件即恢复。
+  - 显存 OOM：`GPU_MEM_UTIL=0.98` 启动 vLLM，日志明确报 free memory 不足；访客页降级话术；默认参数重启恢复。
+  - 附加 model-service 宕机：`/readyz` 503 models；embedding 失败触发 `kb_unavailable`，正常拒答；`start.sh models` 恢复。
+- 演练中修复 4 处：①`/readyz` 增加 chroma 组件（向量库不可用时 503）；②检索节点捕获 `DependencyUnavailable` → `kb_unavailable` 降级，继续联网/拒答；③流式异常统一为“服务暂时不可用，请稍后再试”，异常只进日志；④上传写文件 `OSError` 返回 503/6001 明确提示。
+- 收尾：`/etc/hosts` 已还原、Chroma 目录已还原、磁盘回到 13G 可用、vLLM 默认 0.75/6144/8 重启完成；`/readyz` 四项全绿，正常知识库问答恢复。计划升 v1.19，M7 标记达标。
+
+## P8 准备：单元测试覆盖率基线（2026-11-15 晚）
+- 在服务器 web venv 安装 `pytest-cov`（开发期工具，非运行依赖），用当前部署代码跑 `pytest --cov=app`：**162 通过 5 跳过，总覆盖率 68%**，低于 P8-01 的 ≥70%。
+- 低覆盖集中在：`chat_service.py` 49%、`repositories/*` 23–32%、`auth_service.py` 32%、`kb_service.py` 31%、`llm_client.py` 34%、`anysearch.py` 43%、`edu/client.py` 35%。
+- 结论：P8-01 需要补 repository/service/异常分支测试，并把“核心模块”范围写进测试计划；P8 其余任务尚未开始。
+
+## P8 执行口径确认（2026-11-15 晚）
+- D-20：P8-04 方案 A + 扩样。复用 P4 对比，微调版复测；人工对比样本从 12–16 题扩到 **50 题**（40 可答 + 10 库外）。vLLM 同时挂基座 `qwen2.5-7b-instruct` 与 `campus-lora`，按模型名分别调用，**不停服**。
+- D-21：P8-03 学生教务 E2E 等校方网络恢复；先做访客问答、管理员上传→检索两条，学生路径标记 blocked，不伪造通过。
+- D-22：保留现有测试账号与口令（admin/Admin@12345 等）；弱口令列为已知风险，P8-05 评估登录失败限流作为补偿控制，交付前不改口令。
+- D-23：P8-06 授权外部端口扫描；实测公网 31209（SSH）+ 44368（HTTP）可达，22/80/443/3306/8001/8002/8080 均不可达，旧“22/443”口径废弃。
+- D-24：P8-01 核心模块 = `app/services`、`app/repositories`、`app/agents`、`app/rag`、`app/core`；不含 `main.py` 静态托管与 `integrations/edu` SDK 内部。计划升 v1.20，测试计划/交接说明同步。
+
+## P8 测试与质量收敛执行（2026-11-15 晚）
+- P8-01：新增 9 个测试文件（clients/store/services/agents/chat_flow/parser/core_branches/repositories/api_integration），补仓储、服务、客户端、解析、对话主流程分支。最终 **核心语句 90.9%、核心分支 81.8%、全项目 86.9%**；218 unit + 4 仓储 + 10 接口/原集成 = **232 通过**。安装 `pytest-cov`/`pytest-asyncio`（开发期依赖），建立独立测试库 `campus_assistant_test`。
+- P8-02：`test_p8_api_integration.py` 覆盖 21 条路径的主要操作，含 401/403/422/404/405 与 SSE 正例；用假 Kb/Edu/Chat/Retriever 依赖隔离外部系统，Auth/会话走真实测试库。
+- P8-03：`scripts/e2e_p8.py`（Playwright）跑通访客问答、库外拒答、管理员上传→解析→检索→删除清理；学生教务按 D-21 标记 `blocked_external`。截图 `docs/p8-e2e-shots/`，录屏 `docs/p8-e2e-videos/e2e-main.webm`。
+- P8-04：`eval/qa_p8_50.json`（40 可答 + 10 库外）；裸模型对比（同证据/提示词）基座 vs LoRA：引用覆盖 0.458→0.92、引用文档准确率 87.5%→90%、违规 16→10；端到端 50 题：库外拒答 **100%**、可答误拒 **5%（G04/G08）**、引用文档准确率 **90%**、确认编造 **0**。报告 `docs/19`。
+- P8-05：越权 403/404、SQLi 无 500、XSS 未执行（`window.__xss=None`、`img[onerror]` 0）、提示词注入未泄露、`.php` 422、双扩展名 `.php.pdf` 可入库但解析失败、路径穿越 404、日志无明文口令、CORS 拒绝恶意 Origin；弱口令按 D-22 接受。安全探针脚本 `scripts/p8_sec_probe.py`；报告 `docs/20`。
+- P8-06：外部 TCP 实测公网 **31209 + 44368** 可达，22/80/443/3306/8001/8002/8080 不可达；`/metrics` 公网 404；前端 23 个产物无密钥；错误页无堆栈。待用户控制台截图确认。
+- P8-07：抓到并修复两个 P1：①aiomysql/pymysql bytes 参数导致教务绑定 500（改存 hex，读时还原）；②删除后重传相同文件撞 `uk_hash` 500（`find_by_hash(include_deleted)` + `revive_file`）。P2-01 双扩展名、P2-02 弱口令、P2-06 可答误拒 5% 接受；P3 进 backlog。报告 `docs/21`。
+- 文档：计划升 **v1.21**，P8-01～07 状态/M8 更新；新增 `docs/19`～`23`；交接说明、测试计划同步。M8 待控制台截图与用户签收。
+
+## P8 收尾与 M8 签收（2026-11-15 晚）
+- M8 签收：用户确认“M8 签收”；接受 P2-01 双扩展名、P2-02 弱口令、P2-06 可答误拒 5%；学生教务 E2E 按“暂时跳过，不知道何时恢复”记外部阻塞，E2E 按 2/3 书面验收（D-25）。
+- P8-06 闭环：用户提供控制台截图，“自定义服务”入口打开 `i-2.gpushare.com:44368/#/chat`；外部实测公网 31209 + 44368，其余不可达。另发现平台实例监控显示 GPU 0/24GB、0%，与容器内 `nvidia-smi` 的 21.6GiB 不一致，记 D-26：GPU/显存监控以容器内为准，P9-06 巡检直接调 `nvidia-smi`。
+- 清理测试数据：P8-05 标题注入测试创建的会话（id 458，标题 `<img onerror>`）已软删除；标题当时按纯文本渲染、未执行。随后按标题模式再清理 **329 条**历史测试会话（`u*`/`t*`/`c*`/`并发*`/断线测试/多轮测试/延迟测试/开工自检/复现/事件排查/新会话/管理员会话 + 注入标题），保留 6 条真实示例（考试作弊、食堂、课表、你好、国家助学金）；消息与引用级联删除。
+- 前端收尾：`GuestChat.vue` 文案“每 IP 每分钟限 10 次”→“每位访客每分钟限 10 次”；用 Node 22 在临时目录 `npm ci` 重建，发现 `markdown-it`/`dompurify` 未写进 `package.json`（换机器构建会失败，记 P1-03），补进 `package.json`/`package-lock.json` 后构建成功；新 `dist` 已部署，旧 dist 备份 `/hy-tmp/campus/backup/frontend-dist-pre-p8-20261115.tar.gz`，Playwright 复检访客页/登录页无 console error。
+- 文档：计划升 **v1.22**（P8 ✅、M8 ✅、D-25/D-26、P1-03）；`docs/20`/`21`/`23` 更新；交接说明/记忆同步。P8 全部收口，下一步 P9。
+
+## P9 部署交付进展（2026-11-15 晚）
+- P9-01：用户决定保持现状（D-27），继续 `scripts/start.sh`/`stop.sh` 手动托管，不引入 systemd/watchdog；服务 root 运行，重启实例后手动启动；写入 `docs/24`。
+- P9-02：公网实测 SSE 逐块（meta 1.55s，后续 delta 连续）；**20MB 上传成功但耗时 165s**（平台代理约 127KB/s），记录为带宽限制；测试文件已删除。
+- P9-03：新做 DB/Chroma 快照（185KB + 2.1MB），独立恢复到 `campus_assistant_restore` 与 `/tmp/chroma-p9-restore`；**13 张表计数与生产完全一致，Chroma 305**；恢复+比对约 10 秒，演练后清理临时库/目录（`docs/25`）。
+- P9-04：生成发布包 `release-v1.0.0-20261115.tar.gz`（1.2MB）；解压 + 20 条回归测试 9 秒，发布/回滚手册见 `docs/27`；Git 提交/tag/推送待用户统一处理。
+- P9-05：清理历史测试会话 329 条（保留 6 条真实示例后又被重置），用 `scripts/seed_demo_chats.py` 生成三角色示例：admin/20230001/20230002 各 3 个真实问答会话（id 459–467），访客不落库；演示脚本见 `docs/26`。
+- P9-06：新增 `scripts/p9_healthcheck.py`，检查 `/readyz`、进程、磁盘、容器内显存、AnySearch 配额、事件循环/RSS，并在日志 >100MB 时 copytruncate；首次运行 `status=ok`（显存 87.5%、配额 1721、磁盘 75%），写入 `/hy-tmp/campus/logs/health.log`（`docs/24`）。
+- P9-07：更新 README（状态、HTTP、232 测试、文档索引），新增 `docs/24`～`30`。
+- **镜像口径（D-29）**：代码/venv/模型/DB/Chroma 都在 `/hy-tmp`，平台镜像只含系统盘；演示优先保留原实例，若用镜像新建实例必须同时从 OSS 恢复 `/hy-tmp` 数据（`docs/30`）。
+- 待办：P9-04 用户统一提交推送/tag；P9-08 用户预演 2 次；P9-09 用户定保留期；P9 完成后用户创建镜像。
+
+## P9 收尾：工程完整性与关机备份（2026-11-15 晚）
+- 关机策略（D-30）：用户近期关机，教务网络恢复时开机补 P5/P6 联调，之后关机，答辩再开机；**每次关机前备份 `/hy-tmp` 到 OSS + 本地**，恢复后手动 `scripts/start.sh`。
+- 本地完整包：`D:\Desktop\CamScanner\campus-final-2026-11-15\`：`final-appdata-20261115.tar.gz`（220MB：代码/`.env`/前端 dist/uploads/chroma/adapter/SFT 数据/KB 种子）、`final-db-20261115.sql.gz`（191KB）、`release-v1.0.0-20261115.tar.gz`（1.2MB）、`README.md`（恢复步骤）。
+- KB 种子入库：从生产导出 20 份原始文档 + `manifest.json` 到 `data/kb_seed/`（23MB）；新增 `scripts/export_kb_seed.py`（导出）与 `scripts/seed_kb.py`（上传 + 等待解析 + 回填 topics）；解决“迁移 0005 在空库上不会给新上传文件打主题”的重建缺口。
+- 前端入库：`.gitignore` 增加 `!frontend/dist/**` 与 `!/data/kb_seed/**`；`frontend/dist`（1.6MB）与 `data/kb_seed` 可随仓库部署（服务器 Node 14 不能构建 Vite 8，dist 必须入库）。
+- LoRA adapter 161MB 不入 Git（GitHub 单文件 100MB 限制），保存在本地完整包 `data/sft/output/`；基座模型用 `fetch_models.sh` 下载，venv 用 `install.sh` 重建。
+- 文档：新增 `docs/24`～`30`；README 更新状态/HTTP/232 测试/命令/文档索引；计划升 v1.24（D-30/D-31）；docs/01/06/17/18/21 的 systemd/“P9 再托管”旧口径统一改为 D-27 手动托管；P8-04 计划行由 60 题改为 50 题（与 D-20 一致）。
+- 测试数据：软删除历史测试会话 329 条；三角色示例 9 条（id 459–467）。
+- 关机前仍建议：在服务器跑一次 `bash scripts/backup.sh`（OSS 登录态可能过期，需 `oss login`），并把 `campus-final-2026-11-15` 复制到 U 盘/另一台机器。
+- 关机前复核（19:37）：重新生成 `final-appdata-20261115.tar.gz`（220MB，含最新 `.env` 的 ADAPTER_REPO/REVISION）与 `final-db-20261115.sql.gz`（191KB）；首次 scp 传输出现 CRC 错误，改为服务器 80MB 分块 + 本地拼接 + SHA256 校验，`c478f6ac24c31fea87b6fc319f4d55299bc4526e91df3d4bcd196e4d958115b5` 一致，`gzip -t` 通过；DB dump `gzip -t` 通过。
+
+## P9 文档一致性审计（2026-11-15 晚）
+- 决策记录：计划决策表 D-01～D-31 齐全；交接说明列仍在执行的 D-09～D-31，并注明早期 D-01～D-08 见计划 §1.5。
+- 修正的冲突：
+  1. **systemd 旧口径**：docs/01 可用性、docs/06 §4/§5、docs/17 §7、docs/18 §5、docs/21 P3-05、计划 R14/P7-06 仍写“P9-01 托管/再托管”，统一改为 **D-27 保持手动 `start.sh`**。
+  2. **P8-04 样本量**：计划 P8-04 行仍写 60 题，改为 **50 题（40+10）**，与 D-20/`docs/19` 一致。
+  3. **探针数量**：docs/13 P5 报告“三项全绿”加注“当时；P7-06 后增加 chroma，现为四项”。
+  4. **P9-01 验收**：由“systemd 自动拉起”改为“手动 `start.sh` 拉起；镜像只含系统盘、数据靠备份”。
+  5. **P9-03 验收**：由“完整恢复”改为“独立库/目录恢复 + 计数比对”，与 `docs/25` 实际演练一致。
+  6. **docs/06 目录布局**：`venv-*`/`/root/campus`/`data/mysql` 旧布局改为实际 `venvs/`、`app/`、`/var/lib/mysql`。
+  7. **备份口径**：docs/06 原写“模型与 adapter 不进备份（可重新下载）”，改为“基座可重下，**adapter 必须备份**”。
+  8. **README**：状态 P0–P8 完成/P9 进行中、HTTP 非 HTTPS、232 测试、命令与文档索引更新；测试账号保留说明与 D-22 一致。
+  9. **暴露面口径**：计划 P8-06/D-23 由“22/443”改为实测“31209 + 44368”，22/80/443/3306/8001/8002/8080 不可达。
+- 历史文档（devlog 旧条目、docs/10/13/17 的当时数据）保留原样，作为时间点记录，不回改。
+
+## LoRA adapter 分发（2026-11-15 晚）
+- 明确口径：LoRA adapter 只是增量权重（`adapter_model.safetensors` 155MB，r=16/alpha=32），推理必须“基座 Qwen2.5-7B + adapter”，生产模型名 `campus-lora` 就是这个组合；按 D-10 不合并基座（D-32）。
+- 新增 `scripts/fetch_adapter.py`：按 `ADAPTER_REPO`/`ADAPTER_REVISION`（或 `--repo/--revision`）从 Hugging Face 下载 adapter 到 `data/sft/output`，支持 `HF_ENDPOINT=https://hf-mirror.com` 与私有仓库 `HF_TOKEN`；校验 adapter_config/adapter_model 存在。
+- `install.sh` 的 dl 环境增加 `huggingface_hub`；`.env.example` 增加 `ADAPTER_REPO/ADAPTER_REVISION`；新增 `docs/31-LoRA与HuggingFace分发.md`（HF 上传步骤、许可证、模型卡模板、下载命令）。
+- 上传由用户执行（需要 HF 账号/token）：adapter 从本地完整包或服务器 `data/sft/output` 取出，排除 `checkpoint-*`；上传后固定 revision 写进 `.env`。本地完整包仍作兜底，不依赖 HF。
+- **网络实测**：云服务器访问 `huggingface.co` 超时（curl 000），`hf-mirror.com` 200；镜像站只支持下载、不支持上传。因此上传改在 Windows 本机（或浏览器/代理），服务器只用于 `--endpoint https://hf-mirror.com` 下载。已在服务器生成 `campus-lora-p4-v1-upload.tar.gz`（147MB，解包 170MB，含模型卡），复制到本地 `campus-final-2026-11-15`。服务器 dl venv 已装 `huggingface_hub 2.4.0`，`hf` 在 `/hy-tmp/campus/venvs/dl/bin/hf`。
+- Windows `pip` 安装后 `hf.exe` 常不在 PATH；新增 `scripts/upload_adapter.py`（纯 Python API，创建仓库+上传+打印 revision），并复制到本地完整包，避免依赖 CLI/PATH。
+- **上传成功并验证**：用户上传到 `Rise-again/campus-lora-p4-v1`（public，173MB，revision `73d6f6f5310fee0ccb4aec00d39a6a13884109a9`）；服务器用 `fetch_adapter.py --endpoint https://hf-mirror.com` 拉回 10 个文件，`adapter_model.safetensors` 与生产 adapter MD5 一致（`51a706e2175f24c8df0a08039f26d2a0`）。`backend/.env` 已写入 `ADAPTER_REPO`/`ADAPTER_REVISION`。
+- **安全提醒**：用户上传截图里 HF token 为明文，已提醒立即 revoke 并重建；token 未写入任何文档/仓库。
+
+## 从 GitHub 部署全流程（2026-11-15 晚）
+- 新增 `docs/32-从GitHub部署全流程.md`：服务器要求 → clone → `install.sh`（含 ADAPTER_REPO 自动下载 adapter）→ `start.sh` → `seed_kb.py` → `seed_demo_chats.py` → 公网/账号 → 巡检/备份/常见问题。
+- `install.sh` 现在支持 `ADAPTER_REPO`/`ADAPTER_REVISION`/`HF_ENDPOINT`：安装依赖与模型后自动下载 adapter、把 `LLM_MODEL` 改为 `campus-lora`，并把 `ADAPTER_REPO/REVISION` 写回 `.env`；未设置时跳过并提示。
+- 明确全流程中的两个“全新库必做”：`seed_kb.py`（20 份 KB 种子 + topics 回填）、`seed_demo_chats.py`（三角色示例）；`install.sh` 只建账号，不导 KB。
+- README/docs30 索引补 docs/31、docs/32；计划升 v1.26。

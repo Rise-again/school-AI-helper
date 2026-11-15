@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import Settings
-from app.core.errors import AppError, NotFound, ValidationFailed
+from app.core.errors import AppError, DependencyUnavailable, NotFound, ValidationFailed
 from app.rag.indexer import Indexer
 from app.rag.parser import SUPPORTED_SUFFIXES
 from app.rag.store import VectorStore
@@ -63,17 +63,23 @@ class KbService:
             raise ValidationFailed(f"文件超过 {self._settings.upload_max_mb}MB 限制")
 
         file_hash = hashlib.sha256(content).hexdigest()
-        existing = await self._repo.find_by_hash(file_hash)
-        if existing:
+        existing = await self._repo.find_by_hash(file_hash, include_deleted=True)
+        if existing and not existing.get("deleted_at"):
             raise ValidationFailed(f"内容相同的文件已存在：{existing['filename']}（id={existing['id']}）")
 
         await asyncio.to_thread(self._upload_dir.mkdir, parents=True, exist_ok=True)
         stored_path = self._upload_dir / f"{file_hash}{suffix}"
-        await asyncio.to_thread(stored_path.write_bytes, content)
+        try:
+            await asyncio.to_thread(stored_path.write_bytes, content)
+        except OSError as exc:
+            logger.error(
+                "upload_write_failed",
+                extra={"extra_fields": {"error": f"{exc.__class__.__name__}: {exc}"[:200]}},
+            )
+            raise DependencyUnavailable("存储空间不足或文件写入失败，请联系管理员") from exc
 
-        file_id = await self._repo.create_file(
+        common = dict(
             filename=filename,
-            file_hash=file_hash,
             file_type=suffix.lstrip("."),
             size_bytes=len(content),
             source_dept=source_dept,
@@ -82,6 +88,12 @@ class KbService:
             effective_to=effective_to.isoformat() if effective_to else None,
             uploaded_by=uploaded_by,
         )
+        if existing:
+            # 同内容文件曾被删除：复活原记录，复用原 id 并重新解析，避免 uk_hash 冲突
+            file_id = int(existing["id"])
+            await self._repo.revive_file(file_id, **common)
+        else:
+            file_id = await self._repo.create_file(file_hash=file_hash, **common)
         task_id = await self._repo.add_task(file_id, stage="pipeline")
         self._spawn(self._run_index(file_id=file_id, task_id=task_id, path=stored_path))
 

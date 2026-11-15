@@ -36,16 +36,30 @@ class HttpOcrClient:
     def __init__(self, base_url: str, *, timeout: float = 900.0) -> None:  # CPU OCR 每页约 30s，整份可能数分钟
         self._base = base_url.rstrip("/")
         self._timeout = timeout
+        # P7-01：复用连接；OCR 单次可能几分钟，连接数不必大
+        self._client: httpx.AsyncClient | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout,
+                limits=httpx.Limits(max_connections=8, max_keepalive_connections=4),
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        client, self._client = self._client, None
+        if client is not None and not client.is_closed:
+            await client.aclose()
 
     async def ocr_file(self, path: Path, *, pages: list[int] | None = None) -> PageTexts:
         raw = await asyncio.to_thread(path.read_bytes)
         data = {"pages": ",".join(str(p) for p in pages)} if pages else {}
         files = {"file": (path.name, raw)}
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.post(f"{self._base}/v1/ocr", files=files, data=data)
-                resp.raise_for_status()
-                payload = resp.json()
+            resp = await self._http().post(f"{self._base}/v1/ocr", files=files, data=data)
+            resp.raise_for_status()
+            payload = resp.json()
         except httpx.HTTPError as exc:
             raise DependencyUnavailable(f"OCR 服务不可用：{exc.__class__.__name__}") from exc
         except ValueError as exc:  # 非 JSON 响应

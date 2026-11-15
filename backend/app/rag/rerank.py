@@ -25,18 +25,32 @@ class HttpRerankerClient:
         self._base = base_url.rstrip("/")
         self._model = model
         self._timeout = timeout
+        # P7-01：复用连接
+        self._client: httpx.AsyncClient | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout,
+                limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        client, self._client = self._client, None
+        if client is not None and not client.is_closed:
+            await client.aclose()
 
     async def rerank(self, query: str, passages: list[str]) -> list[float]:
         if not passages:
             return []
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.post(
-                    f"{self._base}/v1/rerank",
-                    json={"query": query, "passages": passages, "model": self._model},
-                )
-                resp.raise_for_status()
-                payload = resp.json()
+            resp = await self._http().post(
+                f"{self._base}/v1/rerank",
+                json={"query": query, "passages": passages, "model": self._model},
+            )
+            resp.raise_for_status()
+            payload = resp.json()
         except httpx.HTTPError as exc:
             raise DependencyUnavailable(f"重排服务不可用：{exc.__class__.__name__}") from exc
         except ValueError as exc:

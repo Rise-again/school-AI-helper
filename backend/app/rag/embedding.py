@@ -36,40 +36,55 @@ class HttpEmbeddingClient:
         self._model = model
         self._batch_size = batch_size
         self._timeout = timeout
+        # P7-01：复用连接，避免每次向量化都新建客户端
+        self._client: httpx.AsyncClient | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout,
+                limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        client, self._client = self._client, None
+        if client is not None and not client.is_closed:
+            await client.aclose()
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
         vectors: list[list[float]] = []
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            for start in range(0, len(texts), self._batch_size):
-                batch = texts[start : start + self._batch_size]
-                try:
-                    resp = await client.post(
-                        f"{self._base}/v1/embeddings",
-                        json={"input": batch, "model": self._model},
-                    )
-                    resp.raise_for_status()
-                    payload = resp.json()
-                except httpx.HTTPError as exc:
-                    raise DependencyUnavailable(
-                        f"向量化服务不可用：{exc.__class__.__name__}"
-                    ) from exc
-                except ValueError as exc:
-                    raise DependencyUnavailable("向量化服务返回格式不正确") from exc
+        client = self._http()
+        for start in range(0, len(texts), self._batch_size):
+            batch = texts[start : start + self._batch_size]
+            try:
+                resp = await client.post(
+                    f"{self._base}/v1/embeddings",
+                    json={"input": batch, "model": self._model},
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+            except httpx.HTTPError as exc:
+                raise DependencyUnavailable(
+                    f"向量化服务不可用：{exc.__class__.__name__}"
+                ) from exc
+            except ValueError as exc:
+                raise DependencyUnavailable("向量化服务返回格式不正确") from exc
 
-                data = sorted(payload.get("data", []), key=lambda item: item.get("index", 0))
-                if len(data) != len(batch):
+            data = sorted(payload.get("data", []), key=lambda item: item.get("index", 0))
+            if len(data) != len(batch):
+                raise DependencyUnavailable(
+                    f"向量化返回数量不匹配：请求 {len(batch)} 条，返回 {len(data)} 条"
+                )
+            for item in data:
+                vector = item.get("embedding") or []
+                if len(vector) != EXPECTED_DIM:
                     raise DependencyUnavailable(
-                        f"向量化返回数量不匹配：请求 {len(batch)} 条，返回 {len(data)} 条"
+                        f"向量维度异常：期望 {EXPECTED_DIM}，实际 {len(vector)}"
                     )
-                for item in data:
-                    vector = item.get("embedding") or []
-                    if len(vector) != EXPECTED_DIM:
-                        raise DependencyUnavailable(
-                            f"向量维度异常：期望 {EXPECTED_DIM}，实际 {len(vector)}"
-                        )
-                    vectors.append([float(x) for x in vector])
+                vectors.append([float(x) for x in vector])
         return vectors
 
 

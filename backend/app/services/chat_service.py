@@ -31,6 +31,8 @@ from app.agents.state import (
 from app.core.config import Settings
 from app.core.errors import ModelUnavailable, NotFound, RateLimited
 from app.core.logging import trace_id_var
+from app.core.metrics import metrics
+from app.core.net import is_shared_gateway
 from app.core.rate_limit import SlidingWindowLimiter
 from app.integrations.llm_client import LLMClient
 from app.rag.tokens import estimate_tokens
@@ -79,14 +81,17 @@ class ChatService:
         conversations: ConversationRepository,
         settings: Settings,
         guest_limiter: SlidingWindowLimiter | None = None,
+        user_limiter: SlidingWindowLimiter | None = None,
+        ip_limiter: SlidingWindowLimiter | None = None,
     ) -> None:
         self._graph = graph
         self._llm = llm
         self._repo = conversations
         self._settings = settings
-        self._guest_limiter = guest_limiter or SlidingWindowLimiter(
-            limit=settings.rate_limit_per_minute
-        )
+        limit = settings.rate_limit_per_minute
+        self._guest_limiter = guest_limiter or SlidingWindowLimiter(limit=limit)
+        self._user_limiter = user_limiter or SlidingWindowLimiter(limit=limit)
+        self._ip_limiter = ip_limiter or SlidingWindowLimiter(limit=limit)
 
     # ---------------- 公共 ----------------
     async def classify(self, query: str, history: list[dict[str, str]] | None = None) -> str:
@@ -107,6 +112,7 @@ class ChatService:
         role: str,
         conversation_id: int,
         content: str,
+        queued_ms: float = 0.0,
     ) -> AsyncIterator[tuple[str, dict]]:
         await self.ensure_owned(user_id=user_id, conversation_id=conversation_id)
         history = await self._history(conversation_id)
@@ -119,25 +125,44 @@ class ChatService:
             history=history,
             conversation_id=conversation_id,
             identity=f"user:{user_id}",
+            queued_ms=queued_ms,
         ):
             yield event
 
     # ---------------- 访客（匿名） ----------------
     async def stream_guest(
-        self, *, query: str, client_key: str
+        self, *, query: str, client_key: str, queued_ms: float = 0.0
     ) -> AsyncIterator[tuple[str, dict]]:
-        # 配额已在 ensure_guest_allowed 扣减，这里不再重复计数
+        # 配额已在 ensure_allowed 扣减，这里不再重复计数
         async for event in self._generate(
-            query=query, role="guest", history=[], conversation_id=None, identity=f"guest:{client_key}"
+            query=query,
+            role="guest",
+            history=[],
+            conversation_id=None,
+            identity=f"guest:{client_key}",
+            queued_ms=queued_ms,
         ):
             yield event
 
-    def ensure_guest_allowed(self, client_key: str) -> None:
-        """建流前扣减配额并校验，超限抛 RateLimited（429）。"""
-        self._guest_limiter.check(client_key)
+    def ensure_allowed(self, *, user_id: int | None, client_key: str, ip: str | None = None) -> None:
+        """建流前做限流：登录用户按 user_id，访客按 visitor cookie；IP 只作兜底。
+
+        背景：平台代理把所有公网来源折叠成 172.17.0.1，且 X-Forwarded-For 可伪造，
+        所以共享网关地址不参与 IP 计数，访客改用 `visitor_id` cookie（由接口层下发）。
+        """
+        if ip and not is_shared_gateway(ip):
+            self._ip_limiter.check(f"ip:{ip}", scope="ip")
+        if user_id is None:
+            self._guest_limiter.check(f"visitor:{client_key}", scope="guest")
+        else:
+            self._user_limiter.check(f"user:{user_id}", scope="user")
+
+    def ensure_guest_allowed(self, client_key: str, *, ip: str | None = None) -> None:
+        """兼容旧调用：等价于访客检查。"""
+        self.ensure_allowed(user_id=None, client_key=client_key, ip=ip)
 
     def guest_remaining(self, client_key: str) -> int:
-        return self._guest_limiter.remaining(client_key)
+        return self._guest_limiter.remaining(f"visitor:{client_key}")
 
     # ---------------- 核心 ----------------
     async def _history(self, conversation_id: int) -> list[dict[str, str]]:
@@ -185,8 +210,58 @@ class ChatService:
         history: list[dict[str, str]],
         conversation_id: int | None,
         identity: str,
+        queued_ms: float = 0.0,
     ) -> AsyncIterator[tuple[str, dict]]:
+        """指标外壳：无论正常结束、异常还是客户端断线，都记一条 chat_metrics。"""
         started = time.perf_counter()
+        metrics.inc("chat.requests")
+        stats: dict[str, Any] = {
+            "queued_ms": round(queued_ms, 1),
+            # 不叫 first_token_ms：日志脱敏会把含 token 的字段整体打码
+            "first_delta_ms": None,
+            "model_down": False,
+        }
+        try:
+            async for event in self._generate_inner(
+                query=query,
+                role=role,
+                history=history,
+                conversation_id=conversation_id,
+                identity=identity,
+                started=started,
+                stats=stats,
+            ):
+                yield event
+        finally:
+            total_ms = round((time.perf_counter() - started) * 1000, 1)
+            metrics.observe("chat.total_ms", total_ms)
+            if stats.get("first_delta_ms") is not None:
+                metrics.observe("chat.first_delta_ms", float(stats["first_delta_ms"]))
+            if stats.get("model_down"):
+                metrics.inc("chat.model_down")
+            logger.info(
+                "chat_metrics",
+                extra={
+                    "extra_fields": {
+                        **stats,
+                        "total_ms": total_ms,
+                        "role": role,
+                        "conversation_id": conversation_id,
+                    }
+                },
+            )
+
+    async def _generate_inner(
+        self,
+        *,
+        query: str,
+        role: str,
+        history: list[dict[str, str]],
+        conversation_id: int | None,
+        identity: str,
+        started: float,
+        stats: dict[str, Any],
+    ) -> AsyncIterator[tuple[str, dict]]:
         state: dict[str, Any] = {
             "query": query,
             "role": role,
@@ -195,6 +270,19 @@ class ChatService:
             "trace": [],
         }
         state = await self._graph.ainvoke(state)
+
+        # 检索明细只进指标与日志，不进回答；字段缺失时保持 None，别伪造 0
+        trace = state.get("trace") or []
+        retrieve = next((t for t in trace if t.get("node") == "retrieve"), {})
+        stats.update(
+            intent=state.get("intent", ""),
+            degraded=state.get("degraded", ""),
+            evidence=len(state.get("evidence") or []),
+            kb=retrieve.get("kb"),
+            web=retrieve.get("web"),
+            kept=retrieve.get("kept"),
+            kb_top=retrieve.get("kb_top"),
+        )
 
         logger.info(
             "agent_trace",
@@ -221,13 +309,18 @@ class ChatService:
         # 固定回复路径：不调模型，直接落库并返回
         fixed = self._fixed_reply(role=role, state=state)
         if fixed is not None:
+            stats["first_delta_ms"] = round((time.perf_counter() - started) * 1000, 1)
             async for event in self._finish(conversation_id, fixed, [], started, emit_text=True, state=state):
                 yield event
             return
 
         messages = self._build_messages(role=role, query=query, state=state, history=history)
         async for event in self._stream_llm(
-            messages=messages, conversation_id=conversation_id, state=state, started=started
+            messages=messages,
+            conversation_id=conversation_id,
+            state=state,
+            started=started,
+            stats=stats,
         ):
             yield event
 
@@ -251,6 +344,7 @@ class ChatService:
         conversation_id: int | None,
         state: dict[str, Any],
         started: float,
+        stats: dict[str, Any] | None = None,
     ) -> AsyncIterator[tuple[str, dict]]:
         parts: list[str] = []
         failed = False
@@ -278,7 +372,11 @@ class ChatService:
                     break
                 if kind == "down":
                     failed = True
+                    if stats is not None:
+                        stats["model_down"] = True
                     break
+                if stats is not None and stats.get("first_delta_ms") is None:
+                    stats["first_delta_ms"] = round((time.perf_counter() - started) * 1000, 1)
                 parts.append(payload)
                 yield "delta", {"text": payload}
         except (asyncio.CancelledError, GeneratorExit):

@@ -20,6 +20,7 @@ from typing import Any, Awaitable, Callable
 
 from app.agents.state import INTENTS, ROUTER_PROMPT, AgentState, format_context, format_terms
 from app.core.errors import DependencyUnavailable, ModelUnavailable
+from app.core.metrics import metrics
 from app.integrations.anysearch import AnySearchClient
 from app.integrations.llm_client import LLMClient
 from app.rag.freshness import is_stale
@@ -278,6 +279,7 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
         query = state["query"]
         intent = state.get("intent", "kb")
         keywords = state.get("keywords") or query
+        metrics.inc("retrieval.requests")
 
         kb_items = await _kb_search(query, keywords)
         # 主题过滤：问题主题与文件主题不匹配的证据先剔掉。
@@ -313,7 +315,13 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
                 logger.warning("rerank_failed", extra={"extra_fields": {"error": str(exc)}})
 
         merged = kb_items + web_items
+        if kb_items:
+            metrics.inc("retrieval.kb_hit")
+        if web_items:
+            metrics.inc("retrieval.web_hit")
+        metrics.observe("retrieval.kb_top", kb_top)
         if not merged:
+            metrics.inc("retrieval.empty")
             return {
                 "evidence": [],
                 "citations": [],
@@ -323,6 +331,9 @@ def make_nodes(deps: AgentDeps) -> dict[str, Callable[[AgentState], Awaitable[di
 
         ranked = sorted(merged, key=lambda e: e["score"], reverse=True)
         kept = [e for e in ranked if e["score"] >= EVIDENCE_MIN_SCORE][:3]  # 证据越多越容易漏标
+        if not kept:
+            metrics.inc("retrieval.empty")
+        metrics.observe("retrieval.kept", len(kept))
 
         # 弱证据门禁：全都低于阈值、又没有主题匹配时，不硬答
         if kept and max(e["score"] for e in kept) < WEAK_EVIDENCE_SCORE:

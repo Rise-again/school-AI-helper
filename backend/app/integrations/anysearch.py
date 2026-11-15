@@ -53,6 +53,22 @@ class AnySearchClient:
         self._fetch_body = fetch_body
         self._fetch_timeout = fetch_timeout
         self._fetch_max = fetch_max
+        # P7-01：搜索与正文抓取复用同一个连接池；正文解析是 CPU 活，放线程里做
+        self._client: httpx.AsyncClient | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout,
+                follow_redirects=True,
+                limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        client, self._client = self._client, None
+        if client is not None and not client.is_closed:
+            await client.aclose()
 
     @property
     def enabled(self) -> bool:
@@ -74,14 +90,13 @@ class AnySearchClient:
             return []
         query = self.build_query(query)
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.post(
-                    f"{self._base}/v1/search",
-                    headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
-                    json={"query": query, "max_results": self._max, "zone": self._zone},
-                )
-                resp.raise_for_status()
-                payload = resp.json()
+            resp = await self._http().post(
+                f"{self._base}/v1/search",
+                headers={"Authorization": f"Bearer {self._key}", "Content-Type": "application/json"},
+                json={"query": query, "max_results": self._max, "zone": self._zone},
+            )
+            resp.raise_for_status()
+            payload = resp.json()
         except httpx.HTTPError as exc:
             raise DependencyUnavailable(f"搜索服务不可用：{exc.__class__.__name__}") from exc
         except ValueError as exc:
@@ -157,18 +172,21 @@ class AnySearchClient:
         if not self._fetch_body or not items:
             return
         targets = items[: self._fetch_max]
-        async with httpx.AsyncClient(timeout=self._fetch_timeout, follow_redirects=True) as client:
-            async def one(item: dict[str, Any]):
-                try:
-                    resp = await client.get(item["url"])
-                    if resp.status_code != 200:
-                        return
-                    text = self.extract_text(resp.text[:300_000])
-                    if len(text) > len(item["content"]):
-                        item["content"] = text
-                except httpx.HTTPError:
+        client = self._http()
+
+        async def one(item: dict[str, Any]):
+            try:
+                resp = await client.get(item["url"], timeout=self._fetch_timeout)
+                if resp.status_code != 200:
                     return
-            await asyncio.gather(*(one(it) for it in targets))
+                # BeautifulSoup 解析 30 万字符 HTML 是 CPU 活，放线程避免阻塞事件循环
+                text = await asyncio.to_thread(self.extract_text, resp.text[:300_000])
+                if len(text) > len(item["content"]):
+                    item["content"] = text
+            except httpx.HTTPError:
+                return
+
+        await asyncio.gather(*(one(it) for it in targets))
 
     @staticmethod
     def cache_key(query: str, zone: str = "cn") -> str:

@@ -128,9 +128,12 @@ class Settings(BaseModel):
     edu_terms_lookback: int = Field(default=4, ge=1, le=8)  # 成绩聚合往回查几个学期
 
     # 限流与队列（单 worker 内存实现）
+    # P7 口径：同时生成 8 个（与 vLLM max-num-seqs 对齐），队列最多 3 个、最长等 8 秒
     rate_limit_per_minute: int = Field(default=10, ge=1)
-    queue_max_size: int = Field(default=50, ge=1)
-    queue_max_wait_s: float = Field(default=30.0, ge=0)
+    llm_max_concurrency: int = Field(default=8, ge=1)
+    queue_max_size: int = Field(default=3, ge=0)
+    queue_max_wait_s: float = Field(default=8.0, ge=0)
+    slow_request_ms: int = Field(default=3000, ge=100)
 
     # 上传
     upload_dir: Path = PROJECT_ROOT / "data" / "uploads"

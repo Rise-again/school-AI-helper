@@ -53,7 +53,9 @@ class Indexer:
         if not parsed.pages:
             raise ValidationFailed("文档没有可用文本（OCR 后仍为空），请确认文件是否损坏或加密")
 
-        chunks = chunk_pages(
+        # 切片是纯 CPU 活（逐句估算 token），大文件会占几十到几百毫秒，放线程避免卡住事件循环
+        chunks = await asyncio.to_thread(
+            chunk_pages,
             parsed.as_pages(),
             target_tokens=self._target,
             max_tokens=self._max,

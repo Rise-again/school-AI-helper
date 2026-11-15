@@ -31,6 +31,25 @@ class LLMClient:
         self._model = model
         self._key = api_key
         self._timeout = timeout
+        # P7-01：复用连接，避免每次问答都新建 TCP/TLS；单 worker 下 32 条连接足够 6 并发
+        self._client: httpx.AsyncClient | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout,
+                limits=httpx.Limits(
+                    max_connections=32,
+                    max_keepalive_connections=16,
+                    keepalive_expiry=30.0,
+                ),
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        client, self._client = self._client, None
+        if client is not None and not client.is_closed:
+            await client.aclose()
 
     def _headers(self) -> dict[str, str]:
         return {"Content-Type": "application/json", "Authorization": f"Bearer {self._key}"}
@@ -52,14 +71,14 @@ class LLMClient:
         max_tokens: int = 256,
     ) -> str:
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.post(
-                    f"{self._base}/chat/completions",
-                    headers=self._headers(),
-                    json=self._payload(messages, temperature=temperature, max_tokens=max_tokens, stream=False),
-                )
-                resp.raise_for_status()
-                data = resp.json()
+            client = self._http()
+            resp = await client.post(
+                f"{self._base}/chat/completions",
+                headers=self._headers(),
+                json=self._payload(messages, temperature=temperature, max_tokens=max_tokens, stream=False),
+            )
+            resp.raise_for_status()
+            data = resp.json()
         except httpx.HTTPError as exc:
             raise ModelUnavailable(f"模型调用失败：{exc.__class__.__name__}") from exc
         except ValueError as exc:
@@ -78,30 +97,30 @@ class LLMClient:
     ) -> AsyncIterator[str]:
         """逐块产出文本增量。连接异常时抛 ModelUnavailable（已产出的内容由调用方保留）。"""
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                async with client.stream(
-                    "POST",
-                    f"{self._base}/chat/completions",
-                    headers=self._headers(),
-                    json=self._payload(messages, temperature=temperature, max_tokens=max_tokens, stream=True),
-                ) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        chunk = line[5:].strip()
-                        if chunk == "[DONE]":
-                            break
-                        try:
-                            payload = json.loads(chunk)
-                        except ValueError:
-                            continue
-                        choices = payload.get("choices") or []
-                        if not choices:
-                            continue
-                        delta = choices[0].get("delta") or {}
-                        text = delta.get("content")
-                        if text:
-                            yield text
+            client = self._http()
+            async with client.stream(
+                "POST",
+                f"{self._base}/chat/completions",
+                headers=self._headers(),
+                json=self._payload(messages, temperature=temperature, max_tokens=max_tokens, stream=True),
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    chunk = line[5:].strip()
+                    if chunk == "[DONE]":
+                        break
+                    try:
+                        payload = json.loads(chunk)
+                    except ValueError:
+                        continue
+                    choices = payload.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    text = delta.get("content")
+                    if text:
+                        yield text
         except httpx.HTTPError as exc:
             raise ModelUnavailable(f"模型流式调用失败：{exc.__class__.__name__}") from exc

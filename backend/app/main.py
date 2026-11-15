@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -26,6 +27,8 @@ from app.api.v1.router import api_router
 from app.core.config import PROJECT_ROOT, Settings, get_settings
 from app.core.errors import AppError, ErrorCode
 from app.core.logging import log_fields, new_trace_id, setup_logging, trace_id_var
+from app.core.metrics import metrics
+from app.core.rate_limit import QueueGate
 from app.db.pool import Database
 from app.rag.embedding import HttpEmbeddingClient
 from app.rag.indexer import Indexer
@@ -50,6 +53,16 @@ from app.services.kb_service import KbService
 from app.integrations.edu import SchoolSdkEduClient
 
 logger = logging.getLogger("campus")
+
+
+def _rss_mb() -> float | None:
+    """当前进程常驻内存（Linux /proc/self/statm），用于观察空闲水位。"""
+    try:
+        with open("/proc/self/statm", encoding="ascii") as handle:
+            pages = int(handle.read().split()[1])
+        return round(pages * 4096 / 1024 / 1024, 1)
+    except Exception:  # noqa: BLE001 - 只在 Linux 有；失败不影响服务
+        return None
 
 
 @asynccontextmanager
@@ -82,9 +95,10 @@ async def lifespan(app: FastAPI):
         vector_store = UnavailableVectorStore(str(exc)[:300])
 
     embedder = HttpEmbeddingClient(settings.embed_base_url, batch_size=settings.embed_batch_size)
+    ocr_client = HttpOcrClient(settings.ocr_base_url, timeout=settings.ocr_timeout_s)
     indexer = Indexer(
         parser=DocumentParser(
-            HttpOcrClient(settings.ocr_base_url, timeout=settings.ocr_timeout_s),
+            ocr_client,
             pdf_mode=settings.parse_pdf_mode,
             min_chars=settings.ocr_min_chars,
         ),
@@ -134,6 +148,8 @@ async def lifespan(app: FastAPI):
         fetch_timeout=settings.web_fetch_timeout_s,
         fetch_max=settings.web_fetch_max,
     )
+    search_cache = SearchCacheRepository(db)
+    app.state.search_cache = search_cache
     kb_repo_for_terms = KbRepository(db)
     _terms_cache: dict[str, Any] = {"at": 0.0, "titles": []}
 
@@ -151,13 +167,19 @@ async def lifespan(app: FastAPI):
             retriever=app.state.retriever,
             reranker=reranker,
             search=search_client,
-            cache=SearchCacheRepository(db),
+            cache=search_cache,
             search_daily_quota=settings.anysearch_daily_quota,
             search_user_daily_quota=settings.search_user_daily_quota,
             kb_titles_provider=kb_titles,
             edu=app.state.edu_service,
             web_max_age_years=settings.web_max_age_years,
         )
+    )
+    # 生成排队：同时 8 个（对齐 max-num-seqs），队列 3 个、最长 8 秒；超限 429
+    app.state.chat_gate = QueueGate(
+        max_concurrent=settings.llm_max_concurrency,
+        max_queue=settings.queue_max_size,
+        max_wait_s=settings.queue_max_wait_s,
     )
     app.state.chat_service = ChatService(
         graph=agent_graph,
@@ -167,9 +189,34 @@ async def lifespan(app: FastAPI):
     )
 
     logger.info("service_started", extra=log_fields(env=settings.app_env, db_connected=db.connected))
+
+    async def _monitor() -> None:
+        """每秒测一次事件循环延迟与 RSS：阻塞会在这里留下明确记录。"""
+        while True:
+            tick = time.perf_counter()
+            await asyncio.sleep(1.0)
+            lag_ms = (time.perf_counter() - tick - 1.0) * 1000
+            metrics.observe("event_loop.lag_ms", lag_ms)
+            if lag_ms >= 200:
+                logger.warning("event_loop_lag", extra=log_fields(lag_ms=round(lag_ms, 1)))
+            rss = _rss_mb()
+            if rss is not None:
+                metrics.set_gauge("process.rss_mb", rss)
+
+    monitor = asyncio.create_task(_monitor())
     try:
         yield
     finally:
+        monitor.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await monitor
+        # P7-01：显式关闭复用的 HTTP 连接池，避免重启时连接悬空
+        for client in (llm, embedder, reranker, ocr_client, search_client):
+            closer = getattr(client, "aclose", None)
+            if closer is None:
+                continue
+            with contextlib.suppress(Exception):
+                await closer()
         await db.close()
         logger.info("service_stopped")
 
@@ -222,6 +269,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ms=round(elapsed_ms, 1),
                 ),
             )
+        # P7-05：请求量、状态码、非流式延迟；SSE 的延迟由 chat_metrics 单独记
+        if request.url.path not in ("/healthz", "/metrics"):
+            settings = request.app.state.settings
+            is_sse = request.url.path.endswith("/messages") or request.url.path.endswith("/chat/anonymous")
+            metrics.inc("http.requests")
+            metrics.inc(f"http.status.{response.status_code}")
+            if not is_sse:
+                metrics.observe("http.latency_ms", elapsed_ms)
+                if elapsed_ms >= settings.slow_request_ms:
+                    logger.warning(
+                        "slow_request",
+                        extra=log_fields(
+                            method=request.method,
+                            path=request.url.path,
+                            status=response.status_code,
+                            ms=round(elapsed_ms, 1),
+                        ),
+                    )
         trace_id_var.reset(token)
         return response
 
@@ -230,9 +295,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
         if exc.http_status >= 500:
             logger.error("app_error", extra=log_fields(code=exc.code, msg=exc.message))
+        else:
+            metrics.inc(f"app_error.{exc.code}")
         return JSONResponse(
             status_code=exc.http_status,
             content=envelope(exc.code, exc.message, exc.data),
+            headers=exc.headers or None,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -319,6 +387,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         }
         return JSONResponse(status_code=200 if ok else 503, content=body)
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics_view(request: Request) -> JSONResponse:
+        host = request.client.host if request.client else ""
+        # 只允许服务器本机访问；经平台代理进来的是容器网关地址，看不到这些内部指标
+        if host not in ("127.0.0.1", "::1"):
+            raise StarletteHTTPException(status_code=404, detail="Not Found")
+        snapshot = metrics.snapshot()
+        gate = getattr(request.app.state, "chat_gate", None)
+        if gate is not None:
+            snapshot["chat_gate"] = gate.stats()
+        cache = getattr(request.app.state, "search_cache", None)
+        cfg: Settings = request.app.state.settings
+        if cache is not None:
+            try:
+                used = await cache.today_usage("anysearch:global")
+                snapshot["search_quota"] = {
+                    "used": used,
+                    "limit": cfg.anysearch_daily_quota,
+                    "remaining": max(0, cfg.anysearch_daily_quota - used),
+                }
+            except Exception as exc:  # noqa: BLE001 - 配额查不到不影响指标本身
+                snapshot["search_quota"] = {"error": f"{exc.__class__.__name__}: {exc}"[:120]}
+        return JSONResponse(snapshot)
 
 
 

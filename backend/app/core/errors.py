@@ -27,9 +27,17 @@ class AppError(Exception):
     http_status: int = 500
     default_message: str = "服务器内部错误"
 
-    def __init__(self, message: str | None = None, *, data: Any = None) -> None:
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        data: Any = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.message = message or self.default_message
         self.data = data
+        # 429 等场景需要带 Retry-After，由全局异常处理器写回响应头
+        self.headers = headers or {}
         super().__init__(self.message)
 
 

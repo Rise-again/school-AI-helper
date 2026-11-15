@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.core.config import Settings
 from app.core.errors import AuthRequired, Forbidden
 from app.core.logging import trace_id_var
+from app.core.rate_limit import QueueGate
 from app.core.security import decode_token
 from app.db.pool import Database
 from app.services.auth_service import AuthService
@@ -44,6 +45,10 @@ def get_kb_service(request: Request) -> KbService:
 
 def get_chat_service(request: Request) -> ChatService:
     return request.app.state.chat_service
+
+
+def get_chat_gate(request: Request) -> QueueGate:
+    return request.app.state.chat_gate
 
 
 def get_edu_service(request: Request) -> EduService:
